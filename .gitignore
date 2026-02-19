@@ -14,5 +14,7 @@ contracts/foundry/out/
 contracts/foundry/broadcast/
 
 # Local deployment outputs
-contracts/foundry/deployments/deployments.toml
+contracts/foundry/deployments/base.toml
+contracts/foundry/deployments/megaeth.toml
+contracts/foundry/deployments/megaeth_quoters.toml
 contracts/foundry/deployments/*.mainnet.toml

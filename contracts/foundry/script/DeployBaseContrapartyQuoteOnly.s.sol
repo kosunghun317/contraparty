@@ -18,7 +18,7 @@ contract DeployBaseContrapartyQuoteOnly {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     string internal constant DEPLOYMENT_DIR = "deployments";
-    string internal constant DEPLOYMENT_FILE = "deployments/base.yaml";
+    string internal constant DEPLOYMENT_FILE = "deployments/base.toml";
 
     event ContrapartyDeployed(address contraparty, address uniswapV3Amm, address uniswapV2Amm, address aerodromeAmm);
 
@@ -44,30 +44,31 @@ contract DeployBaseContrapartyQuoteOnly {
     {
         vm.createDir(DEPLOYMENT_DIR, true);
 
-        string memory yaml = string(
+        string memory toml = string(
             abi.encodePacked(
-                "chain: base\n",
-                "chain_id: 8453\n",
-                "contraparty: \"",
+                "[base]\n",
+                "chain = \"base\"\n",
+                "chain_id = 8453\n",
+                "contraparty = \"",
                 _toHexString(contraparty),
                 "\"\n",
-                "amms:\n",
-                "  uniswap_v3: \"",
+                "deployed_at_unix = ",
+                _toString(block.timestamp),
+                "\n\n",
+                "[base.amms]\n",
+                "uniswap_v3 = \"",
                 _toHexString(uniswapV3Amm),
                 "\"\n",
-                "  uniswap_v2: \"",
+                "uniswap_v2 = \"",
                 _toHexString(uniswapV2Amm),
                 "\"\n",
-                "  aerodrome: \"",
+                "aerodrome = \"",
                 _toHexString(aerodromeAmm),
-                "\"\n",
-                "deployed_at_unix: ",
-                _toString(block.timestamp),
-                "\n"
+                "\"\n"
             )
         );
 
-        vm.writeFile(DEPLOYMENT_FILE, yaml);
+        vm.writeFile(DEPLOYMENT_FILE, toml);
     }
 
     function _extractAddress(string memory fileContent, string memory field) internal pure returns (address) {
@@ -90,12 +91,12 @@ contract DeployBaseContrapartyQuoteOnly {
 
         require(foundAt != type(uint256).max, "FIELD_NOT_FOUND");
 
-        while (foundAt < data.length && data[foundAt] != ":") {
+        while (foundAt < data.length && data[foundAt] != ":" && data[foundAt] != "=") {
             unchecked {
                 ++foundAt;
             }
         }
-        require(foundAt < data.length, "BAD_YAML");
+        require(foundAt < data.length, "BAD_CONFIG");
         unchecked {
             ++foundAt;
         }

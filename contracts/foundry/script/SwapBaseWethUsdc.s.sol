@@ -25,7 +25,7 @@ interface IContrapartySwap {
 
 contract SwapBaseWethUsdc {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-    string internal constant DEPLOYMENT_FILE = "deployments/base.yaml";
+    string internal constant DEPLOYMENT_FILE = "deployments/base.toml";
 
     address internal constant WETH = 0x4200000000000000000000000000000000000006;
     address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
@@ -78,12 +78,12 @@ contract SwapBaseWethUsdc {
 
         require(foundAt != type(uint256).max, "FIELD_NOT_FOUND");
 
-        while (foundAt < data.length && data[foundAt] != ":") {
+        while (foundAt < data.length && data[foundAt] != ":" && data[foundAt] != "=") {
             unchecked {
                 ++foundAt;
             }
         }
-        require(foundAt < data.length, "BAD_YAML");
+        require(foundAt < data.length, "BAD_CONFIG");
         unchecked {
             ++foundAt;
         }

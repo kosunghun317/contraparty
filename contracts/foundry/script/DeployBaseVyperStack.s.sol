@@ -21,7 +21,7 @@ interface IUniswapV3PropAMM {
 contract DeployBaseVyperStack {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     string internal constant DEPLOYMENT_DIR = "deployments";
-    string internal constant DEPLOYMENT_FILE = "deployments/base.yaml";
+    string internal constant DEPLOYMENT_FILE = "deployments/base.toml";
 
     address internal constant UNISWAP_V3_VIEW_QUOTER = 0x222cA98F00eD15B1faE10B61c277703a194cf5d2;
     address internal constant UNISWAP_V3_WETH_USDC_POOL_500 = 0xd0b53D9277642d899DF5C87A3966A349A798F224;
@@ -58,23 +58,24 @@ contract DeployBaseVyperStack {
     {
         vm.createDir(DEPLOYMENT_DIR, true);
 
-        string memory yaml = "chain: base\nchain_id: 8453\n";
-        yaml = string.concat(yaml, "contraparty: \"", _toHexString(contraparty), "\"\n");
-        yaml = string.concat(yaml, "amms:\n");
-        yaml = string.concat(yaml, "  uniswap_v3: \"", _toHexString(uniswapV3Amm), "\"\n");
-        yaml = string.concat(yaml, "  uniswap_v2: \"", _toHexString(uniswapV2Amm), "\"\n");
-        yaml = string.concat(yaml, "  aerodrome: \"", _toHexString(aerodromeAmm), "\"\n");
-        yaml = string.concat(yaml, "v3_quoter: \"", _toHexString(UNISWAP_V3_VIEW_QUOTER), "\"\n");
-        yaml = string.concat(yaml, "pools:\n");
-        yaml = string.concat(yaml, "  uniswap_v3_weth_usdc_500:\n");
-        yaml = string.concat(yaml, "    address: \"", _toHexString(UNISWAP_V3_WETH_USDC_POOL_500), "\"\n");
-        yaml = string.concat(yaml, "    fee: ", _toString(V3_FEE_500), "\n");
-        yaml = string.concat(yaml, "  uniswap_v3_weth_usdc_3000:\n");
-        yaml = string.concat(yaml, "    address: \"", _toHexString(UNISWAP_V3_WETH_USDC_POOL_3000), "\"\n");
-        yaml = string.concat(yaml, "    fee: ", _toString(V3_FEE_3000), "\n");
-        yaml = string.concat(yaml, "deployed_at_unix: ", _toString(block.timestamp), "\n");
+        string memory toml = "[base]\n";
+        toml = string.concat(toml, "chain = \"base\"\n");
+        toml = string.concat(toml, "chain_id = 8453\n");
+        toml = string.concat(toml, "contraparty = \"", _toHexString(contraparty), "\"\n");
+        toml = string.concat(toml, "v3_quoter = \"", _toHexString(UNISWAP_V3_VIEW_QUOTER), "\"\n");
+        toml = string.concat(toml, "deployed_at_unix = ", _toString(block.timestamp), "\n\n");
+        toml = string.concat(toml, "[base.amms]\n");
+        toml = string.concat(toml, "uniswap_v3 = \"", _toHexString(uniswapV3Amm), "\"\n");
+        toml = string.concat(toml, "uniswap_v2 = \"", _toHexString(uniswapV2Amm), "\"\n");
+        toml = string.concat(toml, "aerodrome = \"", _toHexString(aerodromeAmm), "\"\n\n");
+        toml = string.concat(toml, "[base.pools.uniswap_v3_weth_usdc_500]\n");
+        toml = string.concat(toml, "address = \"", _toHexString(UNISWAP_V3_WETH_USDC_POOL_500), "\"\n");
+        toml = string.concat(toml, "fee = ", _toString(V3_FEE_500), "\n\n");
+        toml = string.concat(toml, "[base.pools.uniswap_v3_weth_usdc_3000]\n");
+        toml = string.concat(toml, "address = \"", _toHexString(UNISWAP_V3_WETH_USDC_POOL_3000), "\"\n");
+        toml = string.concat(toml, "fee = ", _toString(V3_FEE_3000), "\n");
 
-        vm.writeFile(DEPLOYMENT_FILE, yaml);
+        vm.writeFile(DEPLOYMENT_FILE, toml);
     }
 
     function _toHexString(address account) internal pure returns (string memory) {

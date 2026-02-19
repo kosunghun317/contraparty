@@ -14,4 +14,4 @@ megaeth = "${MEGAETH_RPC_URL}"
 megaeth_ws = "${MEGAETH_WSS_URL}"
 
 [profile.default.vyper]
-path = "../.venv/bin/vyper"
+path = ".venv/bin/vyper"

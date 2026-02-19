@@ -60,15 +60,15 @@ This script deploys and registers:
 - `AerodromePropAMM.vy`
 
 Deployment info is saved automatically to:
-- `deployments/deployments.toml`
+- `deployments/base.toml`
 
 Template file:
-- `deployments/deployments.example.toml`
+- `deployments/base.example.toml`
 
 ## 5. Run Real Swap (WETH -> USDC) On Base
 
 The swap script reads Contraparty address from:
-- `deployments/deployments.toml`
+- `deployments/base.toml`
 
 Then run:
 
@@ -81,7 +81,7 @@ forge script script/SwapBaseWethUsdc.s.sol:SwapBaseWethUsdc \
 ```
 
 Note:
-- `deployments/deployments.toml` must contain addresses from a real `--broadcast` deploy on Base.
+- `deployments/base.toml` must contain addresses from a real `--broadcast` deploy on Base.
 - If it contains dry-run addresses, swap script reverts with `CONTRAPARTY_NOT_DEPLOYED`.
 
 Behavior:

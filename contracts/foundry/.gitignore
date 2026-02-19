@@ -14,5 +14,7 @@ docs/
 .env
 
 # Local deployment outputs
-deployments/deployments.toml
+deployments/base.toml
+deployments/megaeth.toml
+deployments/megaeth_quoters.toml
 deployments/*.mainnet.toml

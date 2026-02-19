@@ -13,7 +13,7 @@ contract DeployMegaethQuoters {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     string internal constant DEPLOYMENT_DIR = "deployments";
-    string internal constant DEPLOYMENT_FILE = "deployments/megaeth_quoters.yaml";
+    string internal constant DEPLOYMENT_FILE = "deployments/megaeth_quoters.toml";
 
     address internal constant PRISM_FACTORY = 0x1adb8f973373505bB206e0E5D87af8FB1f5514Ef;
     address internal constant KUMBAYA_FACTORY = 0x68b34591f662508076927803c567Cc8006988a09;
@@ -32,15 +32,17 @@ contract DeployMegaethQuoters {
 
     function _writeDeploymentFile(address prismQuoter, address kumbayaQuoter) internal {
         vm.createDir(DEPLOYMENT_DIR, true);
-        string memory yaml = "chain: megaeth\nchain_id: 4326\n";
-        yaml = string.concat(yaml, "factories:\n");
-        yaml = string.concat(yaml, "  prism: \"", _toHexString(PRISM_FACTORY), "\"\n");
-        yaml = string.concat(yaml, "  kumbaya: \"", _toHexString(KUMBAYA_FACTORY), "\"\n");
-        yaml = string.concat(yaml, "quoters:\n");
-        yaml = string.concat(yaml, "  prism: \"", _toHexString(prismQuoter), "\"\n");
-        yaml = string.concat(yaml, "  kumbaya: \"", _toHexString(kumbayaQuoter), "\"\n");
-        yaml = string.concat(yaml, "deployed_at_unix: ", _toString(block.timestamp), "\n");
-        vm.writeFile(DEPLOYMENT_FILE, yaml);
+        string memory toml = "[megaeth]\n";
+        toml = string.concat(toml, "chain = \"megaeth\"\n");
+        toml = string.concat(toml, "chain_id = 4326\n");
+        toml = string.concat(toml, "deployed_at_unix = ", _toString(block.timestamp), "\n\n");
+        toml = string.concat(toml, "[megaeth.factories]\n");
+        toml = string.concat(toml, "prism = \"", _toHexString(PRISM_FACTORY), "\"\n");
+        toml = string.concat(toml, "kumbaya = \"", _toHexString(KUMBAYA_FACTORY), "\"\n\n");
+        toml = string.concat(toml, "[megaeth.quoters]\n");
+        toml = string.concat(toml, "prism = \"", _toHexString(prismQuoter), "\"\n");
+        toml = string.concat(toml, "kumbaya = \"", _toHexString(kumbayaQuoter), "\"\n");
+        vm.writeFile(DEPLOYMENT_FILE, toml);
     }
 
     function _toHexString(address account) internal pure returns (string memory) {
