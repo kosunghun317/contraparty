@@ -1,0 +1,18 @@
+counterparty/
+
+# Environment files
+.env
+**/.env
+
+# Python/Poetry
+**/.venv/
+__pycache__/
+
+# Foundry build artifacts
+contracts/foundry/cache/
+contracts/foundry/out/
+contracts/foundry/broadcast/
+
+# Local deployment outputs
+contracts/foundry/deployments/deployments.toml
+contracts/foundry/deployments/*.mainnet.toml

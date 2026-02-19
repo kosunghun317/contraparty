@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contraparty</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="module" src="./wallet.js" defer></script>
+  <script type="module" src="./app.js" defer></script>
+</head>
+
+<body>
+  <main class="app-shell">
+    <section class="brand-panel" aria-label="Project header">
+      <img class="brand-logo" src="./logo.png" alt="contraparty logo" />
+      <h1 class="brand-title">Contraparty</h1>
+    </section>
+
+    <section class="swap-container" aria-label="Swap quote box">
+      <div class="window-meta">
+        <button id="networkChip" class="network-chip network-btn" type="button"
+          aria-label="Select network">Network</button>
+        <div id="walletRoot" class="wallet-root" aria-live="polite"></div>
+      </div>
+
+      <section class="token-section">
+        <div class="token-header token-header-pay">
+          <span class="token-label">You Pay</span>
+          <div class="balance-row" aria-live="polite">
+            <span id="fromBalanceValue" class="balance-value">Balance: -</span>
+            <span class="balance-sep">|</span>
+            <button id="fromMaxBtn" class="balance-action" type="button">max</button>
+            <span class="balance-sep">|</span>
+            <button id="fromHalfBtn" class="balance-action" type="button">50%</button>
+            <span class="balance-sep">|</span>
+            <button id="fromQuarterBtn" class="balance-action" type="button">25%</button>
+          </div>
+          <button id="fromTokenBtn" class="token-select" type="button" aria-label="Select input token"></button>
+        </div>
+        <input id="fromAmount" class="amount-input" type="text" inputmode="decimal" placeholder="0.0"
+          autocomplete="off" />
+      </section>
+
+      <div class="swap-arrow">
+        <button id="flipBtn" class="arrow-btn" type="button" aria-label="Switch tokens">⇅</button>
+      </div>
+
+      <section class="token-section">
+        <div class="token-header">
+          <span class="token-label">You Receive</span>
+          <button id="toTokenBtn" class="token-select" type="button" aria-label="Select output token"></button>
+        </div>
+        <input id="toAmount" class="amount-input" type="text" placeholder="0.0" readonly />
+      </section>
+
+      <section class="advanced-options">
+        <button id="advancedToggle" class="advanced-toggle" type="button" aria-expanded="false"
+          aria-controls="advancedPanel">
+          Advanced Options ▾
+        </button>
+        <div id="advancedPanel" class="advanced-panel" hidden>
+          <div class="advanced-row">
+            <label for="slippageSelect">Max Slippage</label>
+            <div class="slippage-controls">
+              <select id="slippageSelect" class="retro-select" aria-label="Select max slippage">
+                <option value="auto" selected>Auto</option>
+                <option value="0.1">0.1%</option>
+                <option value="0.5">0.5%</option>
+                <option value="1">1%</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input id="slippageCustom" class="retro-input" type="text" inputmode="decimal" placeholder="0.50"
+                aria-label="Custom slippage in percent" hidden />
+            </div>
+          </div>
+          <div class="advanced-row">
+            <label for="recipientInput">Recipient</label>
+            <input id="recipientInput" class="retro-input" type="text" placeholder="Connected wallet or 0x..."
+              autocomplete="off" />
+          </div>
+        </div>
+      </section>
+
+      <section id="quoteInfo" class="quote-info" hidden>
+        <div class="quote-row">
+          <span>Route</span>
+          <strong id="routeInfo">-</strong>
+        </div>
+        <div class="quote-row">
+          <span>Min Received</span>
+          <strong id="minOutInfo">-</strong>
+        </div>
+      </section>
+
+      <button id="swapSubmitBtn" class="swap-submit-btn" type="button">Swap</button>
+
+      <p id="status" class="status">Type an amount to get started.</p>
+      <nav class="footer-links" aria-label="Project links">
+        <a class="docs-link" href="https://x.com/wycfwycf" target="_blank" rel="noopener noreferrer">X (Twitter)</a>
+        <span class="app-version" aria-label="Frontend version">version d87f3cd</span>
+      </nav>
+    </section>
+  </main>
+
+  <div id="tokenModal" class="modal" hidden>
+    <div class="modal-content" role="dialog" aria-modal="true" aria-label="Select token">
+      <div class="modal-header">
+        <h3>Select Token</h3>
+        <button id="closeModalBtn" class="close-btn" type="button" aria-label="Close token selector">×</button>
+      </div>
+      <input id="tokenSearch" class="token-search" type="text" placeholder="Search token by address"
+        autocomplete="off" />
+      <div id="tokenList" class="token-list"></div>
+    </div>
+  </div>
+
+  <div id="chainModal" class="modal" hidden>
+    <div class="modal-content" role="dialog" aria-modal="true" aria-label="Select chain">
+      <div class="modal-header">
+        <h3>Select Chain</h3>
+        <button id="closeChainModalBtn" class="close-btn" type="button" aria-label="Close chain selector">×</button>
+      </div>
+      <div id="chainList" class="token-list"></div>
+    </div>
+  </div>
+</body>
+
+</html>

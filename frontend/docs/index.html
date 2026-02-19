@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contraparty Integration Docs</title>
+    <link rel="stylesheet" href="./docs.css" />
+  </head>
+  <body>
+    <header class="docs-topbar">
+      <a class="brand" href="../">Contraparty</a>
+      <nav>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#contracts">Contracts</a>
+        <a href="#frontend">Frontend</a>
+      </nav>
+    </header>
+
+    <main class="docs-layout">
+      <aside class="docs-nav">
+        <p>Integration</p>
+        <a href="#overview">Overview</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#contracts">Contract Interfaces</a>
+        <a href="#deploy">Deploy Routers</a>
+        <a href="#register">Register Prop AMMs</a>
+        <a href="#swapflow">Swap Flow</a>
+        <a href="#frontend">Frontend Integration</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </aside>
+
+      <article class="docs-content">
+        <section id="overview">
+          <h1>Contraparty Integration</h1>
+          <p>
+            Contraparty routes swaps across multiple registered Prop AMMs. Each Prop AMM must support a minimal quote + swap
+            interface, and return <code>0</code> on unsupported pairs.
+          </p>
+        </section>
+
+        <section id="architecture">
+          <h2>Architecture</h2>
+          <ol>
+            <li>User sends <code>swap(tokenIn, tokenOut, amountIn, minAmountOut)</code> to Contraparty.</li>
+            <li>Contraparty requests quotes from all registered Prop AMMs for each sub-order.</li>
+            <li>AMMs with <code>quote == 0</code> are skipped.</li>
+            <li>Contraparty sorts viable AMMs by penalized score and executes best routes.</li>
+            <li>Failed/under-delivering AMMs receive penalty decay in router selection.</li>
+          </ol>
+        </section>
+
+        <section id="quickstart">
+          <h2>Quickstart</h2>
+          <p>Use the Foundry project under <code>foundry/</code>.</p>
+          <pre><code>cd foundry
+forge build
+forge test -vv --match-contract ContrapartyForkTest</code></pre>
+        </section>
+
+        <section id="contracts">
+          <h2>Contract Interfaces</h2>
+          <p><code>IPropAMM</code> expected by Contraparty:</p>
+          <pre><code>interface IPropAMM {
+  function quote(address tokenIn, address tokenOut, uint256 amountIn)
+    external
+    view
+    returns (uint256 amountOut);
+
+  function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
+    external
+    returns (uint256 amountOut);
+}</code></pre>
+          <p>Contraparty core entry points:</p>
+          <pre><code>function registerAmm(address amm) external;
+function removeAmm(address amm) external;
+function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)
+  external
+  returns (uint256);</code></pre>
+        </section>
+
+        <section id="deploy">
+          <h2>Deploy Prop AMM Routers</h2>
+          <p>Example router implementations already included:</p>
+          <ul>
+            <li><code>foundry/src/UniswapV3PropAMM.sol</code></li>
+            <li><code>foundry/src/AerodromePropAMM.sol</code></li>
+          </ul>
+          <p>
+            For V3 forks, quote logic should include fee and slippage-aware output estimation. If a pool/pair is unsupported,
+            return <code>0</code> instead of reverting.
+          </p>
+        </section>
+
+        <section id="register">
+          <h2>Register Prop AMMs</h2>
+          <pre><code>// Owner only
+contraparty.registerAmm(address(routerA));
+contraparty.registerAmm(address(routerB));</code></pre>
+          <p>
+            Register at least two AMMs where possible. Contraparty's scoring and penalties work best with multiple independent
+            liquidity sources.
+          </p>
+        </section>
+
+        <section id="swapflow">
+          <h2>Swap Flow (Integrator Side)</h2>
+          <pre><code>IERC20(tokenIn).approve(address(contraparty), amountIn);
+uint256 amountOut = contraparty.swap(tokenIn, tokenOut, amountIn, minAmountOut);</code></pre>
+          <p>
+            Use conservative <code>minAmountOut</code> values from current quote response and expected market movement.
+          </p>
+        </section>
+
+        <section id="frontend">
+          <h2>Frontend Integration</h2>
+          <p>
+            The swap page (<code>frontend/index.html</code>) is intentionally minimal for end users. Configure network/router values in
+            <code>frontend/defaults.js</code>.
+          </p>
+          <pre><code>// frontend/defaults.js
+routers: {
+  a: "0xYourRouterA",
+  b: "0xYourRouterB"
+}</code></pre>
+          <p>
+            UI and SDK references for product parity:
+          </p>
+          <ul>
+            <li><a href="https://swap.cow.fi/" target="_blank" rel="noreferrer">CoW Swap UI patterns</a></li>
+            <li><a href="https://app.uniswap.org/" target="_blank" rel="noreferrer">Uniswap UI flow</a></li>
+            <li><a href="https://github.com/cowprotocol/cow-sdk" target="_blank" rel="noreferrer">CoW SDK</a></li>
+            <li><a href="https://docs.uniswap.org/sdk" target="_blank" rel="noreferrer">Uniswap SDK docs</a></li>
+            <li><a href="https://viem.sh/" target="_blank" rel="noreferrer">Viem docs</a></li>
+          </ul>
+          <p>
+            Optional route-style links are supported via hash format:
+            <code>#/chainId/swap/TOKEN_IN/TOKEN_OUT</code>
+          </p>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Troubleshooting</h2>
+          <ul>
+            <li><strong>No quote:</strong> verify router addresses in <code>frontend/defaults.js</code>.</li>
+            <li><strong>Quote returns 0:</strong> AMM likely does not support that pair or pool has no liquidity.</li>
+            <li><strong>Fork tests fail intermittently:</strong> RPC health/latency issues can cause transient failures.</li>
+            <li><strong>Wrong decimals:</strong> ensure token metadata decimals are correct in config.</li>
+          </ul>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
