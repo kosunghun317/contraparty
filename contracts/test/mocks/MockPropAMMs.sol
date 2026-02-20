@@ -22,9 +22,11 @@ contract MockConstantPropAMM {
     // 2 = underfill + approval
     // 3 = skip approval (Contraparty pull should fail)
     // 4 = pull then revert (to validate rollback semantics)
+    // 5 = partial input pull + approval
     uint8 public mode;
     uint256 public quoteAmount;
     uint256 public underfillBps = 5000;
+    uint256 public inputPullBps = 10_000;
     IERC20 public immutable tokenOut;
 
     constructor(address tokenOut_, uint256 quoteAmount_) {
@@ -45,6 +47,11 @@ contract MockConstantPropAMM {
         underfillBps = bps;
     }
 
+    function setInputPullBps(uint256 bps) external {
+        require(bps <= 10_000, "BPS");
+        inputPullBps = bps;
+    }
+
     function quote(address, address, uint256) external view returns (uint256) {
         return quoteAmount;
     }
@@ -57,7 +64,11 @@ contract MockConstantPropAMM {
             revert("MOCK_REVERT_AFTER_PULL");
         }
 
-        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "TRANSFER_IN");
+        uint256 pullAmount = amountIn;
+        if (mode == 5) {
+            pullAmount = (amountIn * inputPullBps) / 10_000;
+        }
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), pullAmount), "TRANSFER_IN");
 
         uint256 amountOut = quoteAmount;
         if (mode == 2) {

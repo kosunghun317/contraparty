@@ -161,4 +161,30 @@ contract ContrapartyV2Test is TestBase {
         );
         assertTrue(!ok, "swap should fail after deadline");
     }
+
+    function testSwap_RefundsLeftoverInputToCaller() public {
+        MockConstantPropAMM partialPullAmm = new MockConstantPropAMM(address(usdc), 130);
+        partialPullAmm.setMode(5);
+        partialPullAmm.setInputPullBps(7000); // Pull only 70% of input.
+        contraparty.register_amm(address(partialPullAmm));
+
+        usdc.mint(address(partialPullAmm), 1_000_000);
+        weth.mint(user, SWAP_AMOUNT);
+
+        uint256 userWethBefore = weth.balanceOf(user);
+
+        vm.startPrank(user);
+        weth.approve(address(contraparty), SWAP_AMOUNT);
+        uint256 amountOut = contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp + 1);
+        vm.stopPrank();
+
+        uint256 expectedPulled = (SWAP_AMOUNT * 7000) / 10_000;
+        uint256 expectedRefund = SWAP_AMOUNT - expectedPulled;
+
+        assertEq(amountOut, 100, "single-bid settlement should still clear at user min");
+        assertEq(weth.balanceOf(user), userWethBefore - expectedPulled, "user should be refunded leftover input");
+        assertEq(weth.balanceOf(address(partialPullAmm)), expectedPulled, "amm should only hold the pulled portion");
+        assertEq(weth.balanceOf(address(contraparty)), 0, "contraparty should not retain token_in leftovers");
+        assertEq(expectedRefund, 30, "sanity-check expected refund");
+    }
 }

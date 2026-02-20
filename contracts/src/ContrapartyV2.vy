@@ -22,6 +22,7 @@ interface ERC20:
     def transfer(receiver: address, amount: uint256) -> bool: nonpayable
     def approve(spender: address, amount: uint256) -> bool: nonpayable
     def allowance(owner: address, spender: address) -> uint256: view
+    def balanceOf(account: address) -> uint256: view
 
 
 interface PropAMM:
@@ -133,6 +134,7 @@ def swap(
     amm_count: uint256 = len(self.amms)
     assert amm_count > 0, "NO_AMMS"
 
+    token_in_balance_before: uint256 = staticcall ERC20(token_in).balanceOf(self)
     assert extcall ERC20(token_in).transferFrom(msg.sender, self, amount_in), "TRANSFER_FROM_FAIL"
 
     amms_local: DynArray[address, MAX_AMMS] = []
@@ -153,6 +155,10 @@ def swap(
 
     assert filled, "ORDER_UNFILLED"
     assert amount_out >= min_amount_out, "MIN_AMOUNT_OUT"
+    token_in_balance_after: uint256 = staticcall ERC20(token_in).balanceOf(self)
+    if token_in_balance_after > token_in_balance_before:
+        leftover_in: uint256 = token_in_balance_after - token_in_balance_before
+        assert extcall ERC20(token_in).transfer(msg.sender, leftover_in), "REFUND_IN_FAIL"
     assert extcall ERC20(token_out).transfer(recipient, amount_out), "TRANSFER_OUT_FAIL"
 
     log SwapRouted(

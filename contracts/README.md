@@ -21,6 +21,7 @@ Notes:
 - Reward-on-overdelivery logic is intentionally removed in V2.
 - `quote()` returns the second-highest raw bid for the full order size.
 - `swap()` enforces a user-supplied `deadline`.
+- `swap()` refunds any per-order leftover `token_in` back to `msg.sender`.
 
 ```mermaid
 flowchart TD
