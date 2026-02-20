@@ -7,10 +7,16 @@ import {MockConstantPropAMM} from "./mocks/MockPropAMMs.sol";
 
 interface IContrapartyV2 {
     function register_amm(address amm) external;
+    function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
     function penalty_score(address amm) external view returns (uint256);
-    function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient)
-        external
-        returns (uint256);
+    function swap(
+        address token_in,
+        address token_out,
+        uint256 amount_in,
+        uint256 min_amount_out,
+        address recipient,
+        uint256 deadline
+    ) external returns (uint256);
 }
 
 contract ContrapartyV2Test is TestBase {
@@ -41,7 +47,8 @@ contract ContrapartyV2Test is TestBase {
 
         vm.startPrank(user);
         weth.approve(address(contraparty), SWAP_AMOUNT);
-        uint256 amountOut = contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user);
+        uint256 amountOut =
+            contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp + 1);
         vm.stopPrank();
 
         // secondHighestScore = (120 - 100) * 1.0 = 20
@@ -65,7 +72,7 @@ contract ContrapartyV2Test is TestBase {
         penalizedRunner.setMode(1);
         vm.startPrank(user);
         weth.approve(address(contraparty), SWAP_AMOUNT * 2);
-        contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 1, user);
+        contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 1, user, block.timestamp + 1);
         vm.stopPrank();
 
         uint256 penalized = contraparty.penalty_score(address(penalizedRunner));
@@ -77,7 +84,8 @@ contract ContrapartyV2Test is TestBase {
 
         uint256 usdcBefore = usdc.balanceOf(user);
         vm.prank(user);
-        uint256 amountOut = contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user);
+        uint256 amountOut =
+            contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp + 1);
         uint256 usdcDelta = usdc.balanceOf(user) - usdcBefore;
 
         // With penalty ~= 0.5:
@@ -96,7 +104,8 @@ contract ContrapartyV2Test is TestBase {
 
         vm.startPrank(user);
         weth.approve(address(contraparty), SWAP_AMOUNT);
-        uint256 amountOut = contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user);
+        uint256 amountOut =
+            contraparty.swap(address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp + 1);
         vm.stopPrank();
 
         // No second bid => secondHighestScore = 0 => settlement = minAmountOut.
@@ -116,9 +125,40 @@ contract ContrapartyV2Test is TestBase {
         vm.prank(user);
         (bool ok,) = address(contraparty).call(
             abi.encodeWithSelector(
-                IContrapartyV2.swap.selector, address(weth), address(usdc), SWAP_AMOUNT, 100, user
+                IContrapartyV2.swap.selector, address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp + 1
             )
         );
         assertTrue(!ok, "swap should fail if no candidate can satisfy minOut");
+    }
+
+    function testQuote_ReturnsSecondHighestBid() public {
+        MockConstantPropAMM high = new MockConstantPropAMM(address(usdc), 170);
+        MockConstantPropAMM mid = new MockConstantPropAMM(address(usdc), 150);
+        MockConstantPropAMM low = new MockConstantPropAMM(address(usdc), 90);
+        contraparty.register_amm(address(high));
+        contraparty.register_amm(address(mid));
+        contraparty.register_amm(address(low));
+
+        uint256 quoted = contraparty.quote(address(weth), address(usdc), SWAP_AMOUNT);
+        assertEq(quoted, 150, "quote should return second-highest bid");
+    }
+
+    function testDeadline_ExpiredSwapReverts() public {
+        MockConstantPropAMM amm = new MockConstantPropAMM(address(usdc), 130);
+        contraparty.register_amm(address(amm));
+
+        usdc.mint(address(amm), 1_000_000);
+        weth.mint(user, SWAP_AMOUNT);
+
+        vm.prank(user);
+        weth.approve(address(contraparty), SWAP_AMOUNT);
+
+        vm.prank(user);
+        (bool ok,) = address(contraparty).call(
+            abi.encodeWithSelector(
+                IContrapartyV2.swap.selector, address(weth), address(usdc), SWAP_AMOUNT, 100, user, block.timestamp - 1
+            )
+        );
+        assertTrue(!ok, "swap should fail after deadline");
     }
 }

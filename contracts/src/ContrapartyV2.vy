@@ -61,6 +61,7 @@ MAX_AMMS: constant(uint256) = 16
 PENALTY_SCALE: constant(uint256) = 10**18
 PENALTY_RECOVERY_TIME: constant(uint256) = 600
 RECOVERY_COEFF: constant(uint256) = PENALTY_SCALE // PENALTY_RECOVERY_TIME
+QUOTE_OUT_CAP: constant(uint256) = 2**128 - 1
 
 AMM_QUOTE_GAS_LIMIT: constant(uint256) = 1_000_000
 TRY_FILL_GAS_LIMIT: constant(uint256) = 1_000_000
@@ -97,6 +98,7 @@ def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
         return 0
 
     best_out: uint256 = 0
+    second_best_out: uint256 = 0
     for i: uint256 in range(MAX_AMMS):
         if i >= amm_count:
             break
@@ -104,9 +106,13 @@ def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
         amm: address = self.amms[i]
         quoted_out: uint256 = self._quote_from_amm(amm, token_in, token_out, amount_in)
         if quoted_out > best_out:
+            second_best_out = best_out
             best_out = quoted_out
+        elif quoted_out > second_best_out:
+            second_best_out = quoted_out
 
-    return best_out
+    # V2 quote reports the second-highest bid (second-price auction reference).
+    return second_best_out
 
 
 @external
@@ -116,11 +122,13 @@ def swap(
     token_out: address,
     amount_in: uint256,
     min_amount_out: uint256,
-    recipient: address = msg.sender
+    recipient: address,
+    deadline: uint256
 ) -> uint256:
     assert amount_in > 0, "AMOUNT_IN_ZERO"
     assert token_in != token_out, "SAME_TOKEN"
     assert recipient != empty(address), "ZERO_RECIPIENT"
+    assert block.timestamp <= deadline, "DEADLINE_EXPIRED"
 
     amm_count: uint256 = len(self.amms)
     assert amm_count > 0, "NO_AMMS"
@@ -387,7 +395,8 @@ def _quote_from_amm(amm: address, token_in: address, token_out: address, amount_
     if not ok or len(response) != 32:
         return 0
 
-    return extract32(response, 0, output_type=uint256)
+    quoted_out: uint256 = extract32(response, 0, output_type=uint256)
+    return min(quoted_out, QUOTE_OUT_CAP)
 
 
 @internal

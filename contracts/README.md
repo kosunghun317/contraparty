@@ -19,7 +19,8 @@ This directory contains the Vyper contracts and Foundry tests/scripts for `Contr
 Notes:
 - Penalty halves on failed fills.
 - Reward-on-overdelivery logic is intentionally removed in V2.
-- `quote()` returns the best raw quote for the full order size.
+- `quote()` returns the second-highest raw bid for the full order size.
+- `swap()` enforces a user-supplied `deadline`.
 
 ```mermaid
 flowchart TD
