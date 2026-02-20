@@ -24,7 +24,7 @@ contract ContrapartyV2Test is TestBase {
     MockERC20 private usdc;
 
     function setUp() public {
-        contraparty = IContrapartyV2(vm.deployCode("src/contrapartyV2.vy"));
+        contraparty = IContrapartyV2(vm.deployCode("src/ContrapartyV2.vy"));
         weth = new MockERC20("Wrapped Ether", "WETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);
     }
@@ -122,4 +122,3 @@ contract ContrapartyV2Test is TestBase {
         assertTrue(!ok, "swap should fail if no candidate can satisfy minOut");
     }
 }
-

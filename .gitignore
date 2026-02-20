@@ -9,12 +9,12 @@ counterparty/
 __pycache__/
 
 # Foundry build artifacts
-contracts/foundry/cache/
-contracts/foundry/out/
-contracts/foundry/broadcast/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
 
 # Local deployment outputs
-contracts/foundry/deployments/base.toml
-contracts/foundry/deployments/megaeth.toml
-contracts/foundry/deployments/megaeth_quoters.toml
-contracts/foundry/deployments/*.mainnet.toml
+contracts/deployments/base.toml
+contracts/deployments/megaeth.toml
+contracts/deployments/megaeth_quoters.toml
+contracts/deployments/*.mainnet.toml

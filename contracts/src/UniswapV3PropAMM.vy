@@ -20,6 +20,7 @@ interface ERC20:
     def transfer(receiver: address, amount: uint256) -> bool: nonpayable
     def approve(spender: address, amount: uint256) -> bool: nonpayable
     def allowance(owner: address, spender: address) -> uint256: view
+    def balanceOf(account: address) -> uint256: view
 
 
 interface UniswapV3Pool:
@@ -62,6 +63,12 @@ event PoolRemoved:
 
 event QuoterUpdated:
     quoter: address
+
+
+event AccruedPulled:
+    token: address
+    recipient: address
+    amount: uint256
 
 
 # -----------------------------------------------------------------------------
@@ -241,6 +248,22 @@ def remove_pool(pool: address):
             return
 
     assert False, "POOL_NOT_FOUND"
+
+
+@external
+def pull_accrued(token: address, amount: uint256 = 0, recipient: address = msg.sender) -> uint256:
+    self._only_owner()
+    assert token != empty(address), "ZERO_TOKEN"
+    assert recipient != empty(address), "ZERO_RECIPIENT"
+
+    pull_amount: uint256 = amount
+    if pull_amount == 0:
+        pull_amount = staticcall ERC20(token).balanceOf(self)
+    assert pull_amount > 0, "ZERO_AMOUNT"
+
+    assert extcall ERC20(token).transfer(recipient, pull_amount), "PULL_FAIL"
+    log AccruedPulled(token=token, recipient=recipient, amount=pull_amount)
+    return pull_amount
 
 
 @external

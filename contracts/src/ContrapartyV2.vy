@@ -2,7 +2,7 @@
 # @license MIT
 
 # -----------------------------------------------------------------------------
-# Contraparty
+# ContrapartyV2
 # -----------------------------------------------------------------------------
 # Execution model:
 # - Ask each registered AMM for a quote for the full order size.

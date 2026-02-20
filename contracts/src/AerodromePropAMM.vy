@@ -26,11 +26,13 @@ interface AerodromePool:
     def swap(amount0Out: uint256, amount1Out: uint256, to: address, data: Bytes[1]): nonpayable
 
 
+owner: public(address)
 factory: public(address)
 
 
 @deploy
 def __init__(factory_: address):
+    self.owner = msg.sender
     self.factory = factory_
 
 
@@ -85,6 +87,21 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
     return amount_out
 
 
+@external
+def pull_accrued(token: address, amount: uint256 = 0, recipient: address = msg.sender) -> uint256:
+    self._only_owner()
+    assert token != empty(address), "ZERO_TOKEN"
+    assert recipient != empty(address), "ZERO_RECIPIENT"
+
+    pull_amount: uint256 = amount
+    if pull_amount == 0:
+        pull_amount = staticcall ERC20(token).balanceOf(self)
+    assert pull_amount > 0, "ZERO_AMOUNT"
+
+    assert extcall ERC20(token).transfer(recipient, pull_amount), "PULL_FAIL"
+    return pull_amount
+
+
 @internal
 @view
 def _best_pool(token_in: address, token_out: address, amount_in: uint256) -> (address, uint256):
@@ -127,3 +144,8 @@ def _quote_pool(pool: address, token_in: address, amount_in: uint256) -> uint256
         return 0
 
     return convert(slice(response, 0, 32), uint256)
+
+
+@internal
+def _only_owner():
+    assert msg.sender == self.owner, "ONLY_OWNER"
