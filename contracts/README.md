@@ -1,91 +1,81 @@
-## Contraparty Foundry (Base)
+# Contraparty Contracts (Foundry + Vyper)
 
-This directory contains:
-- Vyper `Contraparty` contract.
-- Vyper Prop AMMs for Base:
-  - `UniswapV3PropAMM.vy`
-  - `UniswapV2PropAMM.vy`
-  - `AerodromePropAMM.vy`
-- Forge scripts for deployment and swap execution on Base mainnet.
+This directory contains the Vyper contracts and Foundry tests/scripts for `Contraparty` and `ContrapartyV2`.
 
-## 1. Configure Environment
+## ContrapartyV2 Logic
 
-Create a local env file:
+`ContrapartyV2` uses:
+- Full-order quote collection from registered AMMs.
+- Score per AMM:
+  - `score = (quotedAmountOut - minAmountOut) * penaltyCoeff / 1e18`
+- Descending score sort.
+- Second-price settlement on the winner:
+  - `secondHighestScore = score of next candidate`
+  - `settlementOut = max(minAmountOut, minAmountOut + secondHighestScore)`
+- Self-call execution (`try_fill_order`) with fallback:
+  - If an AMM execution fails, that AMM is penalized and the next one is tried.
+  - Swap only fails when all candidates fail.
+
+Notes:
+- Penalty halves on failed fills.
+- Reward-on-overdelivery logic is intentionally removed in V2.
+- `quote()` returns the best raw quote for the full order size.
+
+```mermaid
+flowchart TD
+    A[User calls swap tokenIn tokenOut amountIn minAmountOut recipient] --> B[Transfer tokenIn from user to ContrapartyV2]
+    B --> C[Query all AMMs for full-order quotes]
+    C --> D[Filter quotes >= minAmountOut]
+    D --> E[Compute score = quote minus min times penalty]
+    E --> F[Sort AMMs by score desc]
+    F --> G{Candidates left?}
+    G -- No --> H[Revert ORDER_UNFILLED]
+    G -- Yes --> I[Pick top candidate]
+    I --> J[Compute settlementOut from second-price rule]
+    J --> K[Self-call try_fill_order]
+    K --> L[Approve tokenIn to selected AMM]
+    L --> M[Call amm.swap with settlementOut as min]
+    M --> N[Pull settlementOut tokenOut from AMM]
+    N --> O{Execution success?}
+    O -- Yes --> P[Transfer settlementOut to recipient]
+    P --> Q[Emit SwapRouted and return]
+    O -- No --> R[Apply penalty to failing AMM]
+    R --> G
+```
+
+## Environment
+
+Create local env:
 
 ```bash
 cp .env.example .env
 ```
 
-Fill at least:
+`PRIVATE_KEY` should be set only for broadcast scripts. Do not commit `.env`.
 
-```bash
-BASE_RPC_URL=https://base.llamarpc.com
-PRIVATE_KEY=0x<YOUR_PRIVATE_KEY>
-SWAP_AMOUNT_IN_WEI=10000000000000000
-SWAP_SLIPPAGE_BPS=50
-```
-
-## 2. Where To Store Mainnet Key
-
-Store your key in:
-- `.env` as `PRIVATE_KEY=0x...`
-
-Do not commit `.env`.
-- `.env` is already ignored by git in this repository.
-
-Recommended:
-- Use a dedicated deployer key with limited funds.
-- Prefer hardware-wallet controlled operational flow for production.
-
-## 3. Build
+## Build
 
 ```bash
 forge build
 ```
 
-## 4. Deploy Contraparty + Vyper AMMs On Base
+## Tests
+
+All tests:
 
 ```bash
-source .env
-forge script script/DeployBaseVyperStack.s.sol:DeployBaseVyperStack \
-  --rpc-url base \
-  --broadcast \
-  --private-key $PRIVATE_KEY
+forge test -vv
 ```
 
-This script deploys and registers:
-- `Contraparty.vy`
-- `UniswapV3PropAMM.vy`
-- `UniswapV2PropAMM.vy`
-- `AerodromePropAMM.vy`
-
-Deployment info is saved automatically to:
-- `deployments/base.toml`
-
-Template file:
-- `deployments/base.example.toml`
-
-## 5. Run Real Swap (WETH -> USDC) On Base
-
-The swap script reads Contraparty address from:
-- `deployments/base.toml`
-
-Then run:
+Fork suites:
 
 ```bash
-source .env
-forge script script/SwapBaseWethUsdc.s.sol:SwapBaseWethUsdc \
-  --rpc-url base \
-  --broadcast \
-  --private-key $PRIVATE_KEY
+set -a && source .env && set +a
+forge test -vv --match-contract ContrapartyForkTest
+forge test -vv --match-contract PropAMMVyperForkTest
+forge test -vv --match-contract ContrapartyVyperForkTest
+forge test -vv --match-contract ContrapartyVyperEndToEndForkTest
+forge test -vv --match-contract MegaethForkSmokeTest
+forge test -vv --match-contract MegaethQuoterForkTest
+forge test -vv --match-contract ContrapartyMegaethForkTest
 ```
-
-Note:
-- `deployments/base.toml` must contain addresses from a real `--broadcast` deploy on Base.
-- If it contains dry-run addresses, swap script reverts with `CONTRAPARTY_NOT_DEPLOYED`.
-
-Behavior:
-- Wraps ETH to WETH via `deposit()`.
-- Approves Contraparty.
-- Gets quote via `contraparty.quote(...)` with a 1,000,000 gas cap and computes `minAmountOut` from `SWAP_SLIPPAGE_BPS`.
-- Calls `swap(WETH, USDC, amountIn, minAmountOut)`.

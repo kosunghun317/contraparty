@@ -289,9 +289,6 @@ def _try_fill_full_order(
             self._apply_penalty(amm)
             continue
 
-        if raw_amount_out > quoted_out:
-            self._reward_penalty(amm)
-
         return True, settlement_out
 
     return False, 0
@@ -409,13 +406,6 @@ def _effective_penalty(amm: address) -> uint256:
 def _apply_penalty(amm: address):
     current: uint256 = self._effective_penalty(amm)
     self._update_penalty(amm, current // 2)
-
-
-@internal
-def _reward_penalty(amm: address):
-    current: uint256 = self._effective_penalty(amm)
-    boosted: uint256 = current + (current // 100)
-    self._update_penalty(amm, min(boosted, PENALTY_SCALE))
 
 
 @internal
