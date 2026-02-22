@@ -16,7 +16,7 @@ const MEGAETH_TOKENS = [
   { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", decimals: 8 }
 ];
 
-export const APP_VERSION = "2026.02.22.6";
+export const APP_VERSION = "2026.02.22.2";
 
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
@@ -28,6 +28,7 @@ export const APP_CONFIG = {
       supported: true,
       elfomoQuoteContract: "",
       contrapartyQuoteContract: "",
+      contrapartyVersion: "v1",
       rpcUrl: "https://ethereum-rpc.publicnode.com",
       rpcUrls: [
         "https://ethereum-rpc.publicnode.com",
@@ -50,6 +51,7 @@ export const APP_CONFIG = {
       supported: true,
       elfomoQuoteContract: "0xf0f0F0F0FB0d738452EfD03A28e8be14C76d5f73",
       contrapartyQuoteContract: "0x0341F4282D10C1A130C21CE0BDcE82076951e819",
+      contrapartyVersion: "v1",
       rpcUrl: "https://base-rpc.publicnode.com",
       rpcUrls: [
         "https://base-rpc.publicnode.com",
@@ -71,7 +73,8 @@ export const APP_CONFIG = {
       cowChainId: 0,
       supported: true,
       elfomoQuoteContract: "",
-      contrapartyQuoteContract: "0x338d06316724fff61bd819ff41484c414e15b636",
+      contrapartyQuoteContract: "0x2Ede240d8E64e7Be3B103d9434733D56caFd9059",
+      contrapartyVersion: "v2",
       rpcUrl: "https://mainnet.megaeth.com/rpc",
       rpcUrls: [
         "https://mainnet.megaeth.com/rpc"

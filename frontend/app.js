@@ -34,8 +34,11 @@ const ELFOMO_SWAP_ABI = parseAbi([
 const CONTRAPARTY_QUOTE_ABI = parseAbi([
   "function quote(address token_in, address token_out, uint256 amount_in) view returns (uint256)"
 ]);
-const CONTRAPARTY_SWAP_ABI = parseAbi([
+const CONTRAPARTY_SWAP_V1_ABI = parseAbi([
   "function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient) returns (uint256)"
+]);
+const CONTRAPARTY_SWAP_V2_ABI = parseAbi([
+  "function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient, uint256 deadline) returns (uint256)"
 ]);
 const ERC20_ALLOWANCE_ABI = parseAbi(["function allowance(address owner, address spender) view returns (uint256)"]);
 const ERC20_BALANCE_ABI = parseAbi(["function balanceOf(address owner) view returns (uint256)"]);
@@ -51,6 +54,7 @@ const FALLBACK_QUOTE_OWNER = "0x0000000000000000000000000000000000000001";
 const NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 const MAX_UINT256 = maxUint256;
 const APP_CODE = "contraparty";
+const CONTRAPARTY_V2_SWAP_DEADLINE_SEC = 10 * 60;
 const COW_CHAIN_ID_MAINNET = 1;
 const COW_CHAIN_ID_BASE = 8453;
 const COW_VAULT_RELAYER_BY_CHAIN = {
@@ -77,6 +81,7 @@ const KYBER_CHAIN_SLUG_BY_ID = {
   4326: "megaeth"
 };
 const MEGAETH_CHAIN_IDS = new Set([4326, 6342]);
+const MEGAETH_FIXED_GAS_PRICE_WEI = 1_000_000n; // 0.001 gwei
 
 const els = {
   networkChip: document.getElementById("networkChip"),
@@ -912,26 +917,7 @@ async function resolveTxFeeOverrides(walletClient) {
     return {};
   }
 
-  let gasPrice = 0n;
-  try {
-    gasPrice = await walletClient.getGasPrice();
-  } catch {
-    gasPrice = 0n;
-  }
-
-  if (gasPrice <= 0n) {
-    try {
-      gasPrice = await getProvider().getGasPrice();
-    } catch {
-      gasPrice = 0n;
-    }
-  }
-
-  if (gasPrice > 0n) {
-    return { gasPrice, type: "legacy" };
-  }
-
-  return { type: "legacy" };
+  return { gasPrice: MEGAETH_FIXED_GAS_PRICE_WEI, type: "legacy" };
 }
 
 function getCowQuoteUrl(cowChainId) {
@@ -1612,15 +1598,22 @@ async function executeContrapartySwap(walletClient, owner, quote, receiver) {
     throw new Error("Contraparty contract is not configured on this chain.");
   }
 
+  const contrapartyVersion = String(state.activeNetwork?.contrapartyVersion || "v1").toLowerCase();
+  const swapDeadline = BigInt(Math.floor(Date.now() / 1000) + CONTRAPARTY_V2_SWAP_DEADLINE_SEC);
+  const swapArgs = contrapartyVersion === "v2"
+    ? [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver, swapDeadline]
+    : [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver];
+  const swapAbi = contrapartyVersion === "v2" ? CONTRAPARTY_SWAP_V2_ABI : CONTRAPARTY_SWAP_V1_ABI;
+
   setSwapBusy("Swapping...");
   setStatus("Sending swap transaction to Contraparty...");
   const txRequest = {
     chain: walletClient.chain,
     account: owner,
     address: contrapartyAddress,
-    abi: CONTRAPARTY_SWAP_ABI,
+    abi: swapAbi,
     functionName: "swap",
-    args: [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver]
+    args: swapArgs
   };
   const gas = await estimateContractGasWithFallback(walletClient, txRequest);
   const feeOverrides = await resolveTxFeeOverrides(walletClient);
