@@ -161,8 +161,6 @@ def try_fill_order(
     quoted_out: uint256
 ) -> uint256:
     assert msg.sender == self, "ONLY_SELF"
-    assert amount_in > 0, "AMOUNT_IN_ZERO"
-    assert quoted_out > 0, "ZERO_QUOTE"
 
     current_allowance: uint256 = staticcall ERC20(token_in).allowance(self, amm)
     if current_allowance != 0:
@@ -170,7 +168,7 @@ def try_fill_order(
     assert extcall ERC20(token_in).approve(amm, amount_in), "APPROVE_FAIL"
 
     amount_out: uint256 = extcall PropAMM(amm).swap(token_in, token_out, amount_in, quoted_out)
-    assert amount_out >= quoted_out, "LOW_SWAP_OUT"
+    assert amount_out > 0, "ZERO_SWAP_OUT"
 
     # Pull output from AMM into Contraparty.
     assert extcall ERC20(token_out).transferFrom(amm, self, amount_out), "PULL_OUT_FAIL"
@@ -266,13 +264,6 @@ def _try_fill_full_order(
             continue
 
         amount_out: uint256 = extract32(response, 0, output_type=uint256)
-        if amount_out < quoted_out:
-            self._apply_penalty(amm)
-            continue
-
-        if amount_out > quoted_out:
-            self._reward_penalty(amm)
-
         return True, amount_out
 
     return False, 0
@@ -388,13 +379,6 @@ def _effective_penalty(amm: address) -> uint256:
 def _apply_penalty(amm: address):
     current: uint256 = self._effective_penalty(amm)
     self._update_penalty(amm, current // 2)
-
-
-@internal
-def _reward_penalty(amm: address):
-    current: uint256 = self._effective_penalty(amm)
-    boosted: uint256 = current + (current // 100)
-    self._update_penalty(amm, min(boosted, PENALTY_SCALE))
 
 
 @internal

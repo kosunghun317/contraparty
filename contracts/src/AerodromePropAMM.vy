@@ -57,7 +57,6 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
 
     token0: address = staticcall AerodromePool(best_pool).token0()
     token1: address = staticcall AerodromePool(best_pool).token1()
-    assert (token_in == token0 and token_out == token1) or (token_in == token1 and token_out == token0), "BAD_POOL"
 
     # Pull input from Contraparty and fund selected pool.
     assert extcall ERC20(token_in).transferFrom(msg.sender, self, amount_in), "TRANSFER_FROM_FAIL"
@@ -75,7 +74,6 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
     extcall AerodromePool(best_pool).swap(amount0_out, amount1_out, self, b"")
 
     amount_out_after: uint256 = staticcall ERC20(token_out).balanceOf(self)
-    assert amount_out_after >= amount_out_before, "BAD_BALANCE_DELTA"
     amount_out: uint256 = amount_out_after - amount_out_before
     assert amount_out >= min_amount_out, "MIN_AMOUNT_OUT"
 

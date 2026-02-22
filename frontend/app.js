@@ -76,6 +76,7 @@ const KYBER_CHAIN_SLUG_BY_ID = {
   8453: "base",
   4326: "megaeth"
 };
+const MEGAETH_CHAIN_IDS = new Set([4326, 6342]);
 
 const els = {
   networkChip: document.getElementById("networkChip"),
@@ -856,6 +857,83 @@ function getProvider() {
   return state.provider;
 }
 
+function isMegaethChainId(chainId) {
+  return MEGAETH_CHAIN_IDS.has(Number(chainId || 0));
+}
+
+function withGasBuffer(gas) {
+  if (gas <= 0n) return 0n;
+  return (gas * 120n) / 100n;
+}
+
+async function estimateContractGasWithFallback(walletClient, request) {
+  let gasEstimate = 0n;
+
+  try {
+    gasEstimate = await walletClient.estimateContractGas(request);
+  } catch {
+    gasEstimate = 0n;
+  }
+
+  if (gasEstimate <= 0n) {
+    gasEstimate = await getProvider().estimateContractGas(request);
+  }
+
+  if (gasEstimate <= 0n) {
+    throw new Error("Gas estimation failed for contract call.");
+  }
+
+  return withGasBuffer(gasEstimate);
+}
+
+async function estimateTxGasWithFallback(walletClient, request) {
+  let gasEstimate = 0n;
+
+  try {
+    gasEstimate = await walletClient.estimateGas(request);
+  } catch {
+    gasEstimate = 0n;
+  }
+
+  if (gasEstimate <= 0n) {
+    gasEstimate = await getProvider().estimateGas(request);
+  }
+
+  if (gasEstimate <= 0n) {
+    throw new Error("Gas estimation failed for transaction.");
+  }
+
+  return withGasBuffer(gasEstimate);
+}
+
+async function resolveTxFeeOverrides(walletClient) {
+  const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
+  if (!isMegaethChainId(chainId)) {
+    return {};
+  }
+
+  let gasPrice = 0n;
+  try {
+    gasPrice = await walletClient.getGasPrice();
+  } catch {
+    gasPrice = 0n;
+  }
+
+  if (gasPrice <= 0n) {
+    try {
+      gasPrice = await getProvider().getGasPrice();
+    } catch {
+      gasPrice = 0n;
+    }
+  }
+
+  if (gasPrice > 0n) {
+    return { gasPrice };
+  }
+
+  return {};
+}
+
 function getCowQuoteUrl(cowChainId) {
   if (!cowChainId) return "";
   return COW_QUOTE_URL_BY_CHAIN[cowChainId] || "";
@@ -1501,13 +1579,20 @@ async function approveTokenIfNeeded(walletClient, owner, quote) {
 
   setSwapBusy("Approving...");
   setStatus(`Sending approval to ${shortAddress(approvalState.spender)}...`);
-  const txHash = await walletClient.writeContract({
+  const txRequest = {
     chain: walletClient.chain,
     account: owner,
     address: quote.fromToken,
     abi: ERC20_APPROVE_ABI,
     functionName: "approve",
     args: [approvalState.spender, MAX_UINT256]
+  };
+  const gas = await estimateContractGasWithFallback(walletClient, txRequest);
+  const feeOverrides = await resolveTxFeeOverrides(walletClient);
+  const txHash = await walletClient.writeContract({
+    ...txRequest,
+    gas,
+    ...feeOverrides
   });
   const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
   setStatusTxLink("Approval submitted:", chainId, txHash);
@@ -1529,13 +1614,20 @@ async function executeContrapartySwap(walletClient, owner, quote, receiver) {
 
   setSwapBusy("Swapping...");
   setStatus("Sending swap transaction to Contraparty...");
-  const txHash = await walletClient.writeContract({
+  const txRequest = {
     chain: walletClient.chain,
     account: owner,
     address: contrapartyAddress,
     abi: CONTRAPARTY_SWAP_ABI,
     functionName: "swap",
     args: [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver]
+  };
+  const gas = await estimateContractGasWithFallback(walletClient, txRequest);
+  const feeOverrides = await resolveTxFeeOverrides(walletClient);
+  const txHash = await walletClient.writeContract({
+    ...txRequest,
+    gas,
+    ...feeOverrides
   });
   const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
   setStatusTxLink("Swap submitted:", chainId, txHash);
@@ -1551,13 +1643,20 @@ async function executeElfomoSwap(walletClient, owner, quote, receiver) {
 
   setSwapBusy("Swapping...");
   setStatus("Sending swap transaction to ElfomoFi...");
-  const txHash = await walletClient.writeContract({
+  const txRequest = {
     chain: walletClient.chain,
     account: owner,
     address: elfomoAddress,
     abi: ELFOMO_SWAP_ABI,
     functionName: "swap",
     args: [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver, 0n]
+  };
+  const gas = await estimateContractGasWithFallback(walletClient, txRequest);
+  const feeOverrides = await resolveTxFeeOverrides(walletClient);
+  const txHash = await walletClient.writeContract({
+    ...txRequest,
+    gas,
+    ...feeOverrides
   });
   const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
   setStatusTxLink("Swap submitted:", chainId, txHash);
@@ -1655,7 +1754,6 @@ async function buildKyberSwapTx(quote, owner, receiver) {
   const to = normalizeAddress(data.routerAddress || quote.spender || "");
   const callData = typeof data.data === "string" ? data.data : "";
   const value = parseBigIntLike(data.transactionValue || data.value);
-  const gas = parseBigIntLike(data.gas);
 
   if (!to || !callData || !callData.startsWith("0x")) {
     throw new Error("Kyber route build returned invalid transaction data.");
@@ -1664,8 +1762,7 @@ async function buildKyberSwapTx(quote, owner, receiver) {
   return {
     to,
     data: callData,
-    value,
-    gas: gas > 0n ? gas : undefined
+    value
   };
 }
 
@@ -1674,16 +1771,22 @@ async function executeKyberSwap(walletClient, owner, quote, receiver) {
   setStatus("Building KyberSwap transaction...");
 
   const tx = await buildKyberSwapTx(quote, owner, receiver);
-
-  setSwapBusy("Swapping...");
-  setStatus("Sending swap transaction to KyberSwap...");
-  const txHash = await walletClient.sendTransaction({
+  const txRequest = {
     chain: walletClient.chain,
     account: owner,
     to: tx.to,
     data: tx.data,
-    value: tx.value,
-    gas: tx.gas
+    value: tx.value
+  };
+  const gas = await estimateTxGasWithFallback(walletClient, txRequest);
+  const feeOverrides = await resolveTxFeeOverrides(walletClient);
+
+  setSwapBusy("Swapping...");
+  setStatus("Sending swap transaction to KyberSwap...");
+  const txHash = await walletClient.sendTransaction({
+    ...txRequest,
+    gas,
+    ...feeOverrides
   });
   const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
   setStatusTxLink("Swap submitted:", chainId, txHash);

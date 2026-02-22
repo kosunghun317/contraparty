@@ -87,7 +87,6 @@ pool_pair_key: public(HashMap[address, bytes32])
 # -----------------------------------------------------------------------------
 ts_active: transient(bool)
 ts_pool: transient(address)
-ts_received_out: transient(uint256)
 
 
 # -----------------------------------------------------------------------------
@@ -126,6 +125,7 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
     assert quoted_out >= min_amount_out, "NO_ROUTE_OR_LOW_QUOTE"
 
     assert extcall ERC20(token_in).transferFrom(msg.sender, self, amount_in), "TRANSFER_FROM_FAIL"
+    amount_out_before: uint256 = staticcall ERC20(token_out).balanceOf(self)
 
     zero_for_one: bool = False
     pool_matches_pair: bool = False
@@ -134,34 +134,33 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
 
     self.ts_active = True
     self.ts_pool = best_pool
-    self.ts_received_out = 0
 
     if zero_for_one:
-        amount0_delta: int256 = 0
-        amount1_delta: int256 = 0
-        amount0_delta, amount1_delta = extcall UniswapV3Pool(best_pool).swap(
+        _amount0_delta: int256 = 0
+        _amount1_delta: int256 = 0
+        _amount0_delta, _amount1_delta = extcall UniswapV3Pool(best_pool).swap(
             self,
             True,
             convert(amount_in, int256),
             MIN_SQRT_RATIO_PLUS_ONE,
             b"1",
         )
-        assert amount1_delta < 0, "BAD_SWAP_OUT"
     else:
-        amount0_delta2: int256 = 0
-        amount1_delta2: int256 = 0
-        amount0_delta2, amount1_delta2 = extcall UniswapV3Pool(best_pool).swap(
+        _amount0_delta2: int256 = 0
+        _amount1_delta2: int256 = 0
+        _amount0_delta2, _amount1_delta2 = extcall UniswapV3Pool(best_pool).swap(
             self,
             False,
             convert(amount_in, int256),
             MAX_SQRT_RATIO_MINUS_ONE,
             b"1",
         )
-        assert amount0_delta2 < 0, "BAD_SWAP_OUT"
 
-    assert not self.ts_active, "CALLBACK_NOT_COMPLETED"
-    amount_out: uint256 = self.ts_received_out
-    self._clear_pending()
+    self.ts_active = False
+    self.ts_pool = empty(address)
+
+    amount_out_after: uint256 = staticcall ERC20(token_out).balanceOf(self)
+    amount_out: uint256 = amount_out_after - amount_out_before
 
     assert amount_out >= min_amount_out, "MIN_AMOUNT_OUT"
 
@@ -177,13 +176,6 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
 def uniswapV3SwapCallback(amount0_delta: int256, amount1_delta: int256, _data: Bytes[1]):
     assert self.ts_active, "NO_PENDING_SWAP"
     assert msg.sender == self.ts_pool, "BAD_CB_POOL"
-    assert amount0_delta > 0 or amount1_delta > 0, "NO_DELTA"
-
-    amount_out: uint256 = 0
-    if amount0_delta < 0:
-        amount_out = convert(0 - amount0_delta, uint256)
-    else:
-        amount_out = convert(0 - amount1_delta, uint256)
 
     if amount0_delta > 0:
         token0: address = staticcall UniswapV3Pool(msg.sender).token0()
@@ -191,9 +183,6 @@ def uniswapV3SwapCallback(amount0_delta: int256, amount1_delta: int256, _data: B
     if amount1_delta > 0:
         token1: address = staticcall UniswapV3Pool(msg.sender).token1()
         assert extcall ERC20(token1).transfer(msg.sender, convert(amount1_delta, uint256)), "PAY_POOL1_FAIL"
-
-    self.ts_received_out = amount_out
-    self.ts_active = False
 
 
 # -----------------------------------------------------------------------------
@@ -373,9 +362,3 @@ def _pair_key(token_a: address, token_b: address) -> bytes32:
 def _only_owner():
     assert msg.sender == self.owner, "ONLY_OWNER"
 
-
-@internal
-def _clear_pending():
-    self.ts_active = False
-    self.ts_pool = empty(address)
-    self.ts_received_out = 0

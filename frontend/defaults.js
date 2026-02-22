@@ -16,7 +16,7 @@ const MEGAETH_TOKENS = [
   { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", decimals: 8 }
 ];
 
-export const APP_VERSION = "2026.02.22.3";
+export const APP_VERSION = "2026.02.22.4";
 
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
