@@ -14,6 +14,8 @@ const MEGAETH_TOKENS = [
   { symbol: "USDm", address: "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7", decimals: 18 }
 ];
 
+export const APP_VERSION = "2026.02.22.1";
+
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
   networks: {

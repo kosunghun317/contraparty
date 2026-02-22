@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "./defaults.js";
+import { APP_CONFIG, APP_VERSION } from "./defaults.js";
 import {
   createPublicClient,
   createWalletClient,
@@ -98,6 +98,7 @@ const els = {
   slippageCustom: document.getElementById("slippageCustom"),
   recipientInput: document.getElementById("recipientInput"),
   status: document.getElementById("status"),
+  appVersion: document.querySelector(".app-version"),
   tokenModal: document.getElementById("tokenModal"),
   closeModalBtn: document.getElementById("closeModalBtn"),
   tokenSearch: document.getElementById("tokenSearch"),
@@ -140,6 +141,11 @@ const state = {
 
 function setStatus(msg) {
   els.status.textContent = msg;
+}
+
+function renderAppVersion() {
+  if (!els.appVersion) return;
+  els.appVersion.textContent = `version ${APP_VERSION}`;
 }
 
 function escapeHtml(input) {
@@ -2085,6 +2091,8 @@ function wireWalletEvents() {
 }
 
 function bootstrap() {
+  renderAppVersion();
+
   state.activeNetworkKey = pickNetwork();
   state.activeNetwork = APP_CONFIG.networks[state.activeNetworkKey];
   if (!isNetworkSupported(state.activeNetwork)) {

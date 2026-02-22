@@ -52,8 +52,8 @@
 
         <section id="quickstart">
           <h2>Quickstart</h2>
-          <p>Use the Foundry project under <code>foundry/</code>.</p>
-          <pre><code>cd foundry
+          <p>Use the Foundry project under <code>contracts/</code>.</p>
+          <pre><code>cd contracts
 forge build
 forge test -vv --match-contract ContrapartyForkTest</code></pre>
         </section>
@@ -83,8 +83,8 @@ function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAm
           <h2>Deploy Prop AMM Routers</h2>
           <p>Example router implementations already included:</p>
           <ul>
-            <li><code>foundry/src/UniswapV3PropAMM.sol</code></li>
-            <li><code>foundry/src/AerodromePropAMM.sol</code></li>
+            <li><code>contracts/src/UniswapV3PropAMM.vy</code></li>
+            <li><code>contracts/src/AerodromePropAMM.vy</code></li>
           </ul>
           <p>
             For V3 forks, quote logic should include fee and slippage-aware output estimation. If a pool/pair is unsupported,
