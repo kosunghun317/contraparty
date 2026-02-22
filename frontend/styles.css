@@ -482,9 +482,10 @@ body {
   margin-top: 10px;
   display: flex;
   flex-wrap: nowrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 0;
+  width: 100%;
 }
 
 .docs-link {
@@ -511,6 +512,7 @@ body {
   color: var(--cw-6);
   opacity: 0.72;
   text-align: right;
+  margin-left: auto;
 }
 
 .modal {
