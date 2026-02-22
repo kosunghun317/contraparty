@@ -15,7 +15,7 @@ const MEGAETH_TOKENS = [
 ];
 
 export const APP_CONFIG = {
-  defaultNetwork: "base",
+  defaultNetwork: "megaeth",
   networks: {
     ethereum: {
       label: "Ethereum",
