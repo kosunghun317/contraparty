@@ -928,10 +928,10 @@ async function resolveTxFeeOverrides(walletClient) {
   }
 
   if (gasPrice > 0n) {
-    return { gasPrice };
+    return { gasPrice, type: "legacy" };
   }
 
-  return {};
+  return { type: "legacy" };
 }
 
 function getCowQuoteUrl(cowChainId) {
