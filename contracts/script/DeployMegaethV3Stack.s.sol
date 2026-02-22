@@ -24,6 +24,12 @@ interface IUniswapV3Pool {
     function fee() external view returns (uint24);
 }
 
+interface ICanonicMAOB {
+    function baseToken() external view returns (address);
+    function quoteToken() external view returns (address);
+    function marketState() external view returns (uint8);
+}
+
 contract DeployMegaethV3Stack {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
@@ -41,17 +47,31 @@ contract DeployMegaethV3Stack {
     address internal constant KUMBAYA_WETH_USDT0_POOL = 0x2809696F2e42eB452C32C3d0A2Dc540858C14125;
     address internal constant KUMBAYA_BTCB_USDM_POOL = 0xc1838B7807e5bd4D56EA630BA35Ac964CF72c9db;
     address internal constant KUMBAYA_USDT0_USDM_POOL = 0x6c8E5D463a2473b1A8bcd87e1cEA2724203A1D8f;
+    address internal constant CANONIC_MAOB_WETH_USDM = 0x23469683e25b780DFDC11410a8e83c923caDF125;
+    address internal constant CANONIC_MAOB_BTCB_USDM = 0xaD7e5CBfB535ceC8d2E58Dca17b11d9bA76f555E;
+    address internal constant CANONIC_MAOB_USDT0_USDM = 0xDf1576c3C82C9f8B759C69f4cF256061C6Fe1f9e;
     uint24 internal constant V3_FEE_3000 = 3000;
     uint24 internal constant V3_FEE_100 = 100;
 
     event MegaethStackDeployed(
-        address contraparty, address prismQuoter, address kumbayaQuoter, address prismAmm, address kumbayaAmm
+        address contraparty,
+        address prismQuoter,
+        address kumbayaQuoter,
+        address prismAmm,
+        address kumbayaAmm,
+        address canonicWethUsdmAmm,
+        address canonicBtcbUsdmAmm,
+        address canonicUsdt0UsdmAmm
     );
 
     function run()
         external
         returns (address contraparty, address prismQuoter, address kumbayaQuoter, address prismAmm, address kumbayaAmm)
     {
+        address canonicWethUsdmAmm;
+        address canonicBtcbUsdmAmm;
+        address canonicUsdt0UsdmAmm;
+
         vm.startBroadcast();
 
         prismQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(PRISM_FACTORY));
@@ -59,12 +79,18 @@ contract DeployMegaethV3Stack {
         contraparty = vm.deployCode("src/Contraparty.vy");
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaQuoter));
+        canonicWethUsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_WETH_USDM));
+        canonicBtcbUsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_BTCB_USDM));
+        canonicUsdt0UsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_USDT0_USDM));
 
         _assertPoolInfo(PRISM_WETH_USDM_POOL, WETH, USDM, V3_FEE_3000);
         _assertPoolInfo(KUMBAYA_WETH_USDM_POOL, WETH, USDM, V3_FEE_3000);
         _assertPoolInfo(KUMBAYA_WETH_USDT0_POOL, WETH, USDT0, V3_FEE_3000);
         _assertPoolInfo(KUMBAYA_BTCB_USDM_POOL, BTCB, USDM, V3_FEE_3000);
         _assertPoolInfo(KUMBAYA_USDT0_USDM_POOL, USDT0, USDM, V3_FEE_100);
+        _assertCanonicMarket(CANONIC_MAOB_WETH_USDM, WETH, USDM);
+        _assertCanonicMarket(CANONIC_MAOB_BTCB_USDM, BTCB, USDM);
+        _assertCanonicMarket(CANONIC_MAOB_USDT0_USDM, USDT0, USDM);
 
         IUniswapV3PropAMM(prismAmm).register_pool(PRISM_WETH_USDM_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_WETH_USDM_POOL, V3_FEE_3000);
@@ -74,11 +100,32 @@ contract DeployMegaethV3Stack {
 
         IContraparty(contraparty).register_amm(prismAmm);
         IContraparty(contraparty).register_amm(kumbayaAmm);
+        IContraparty(contraparty).register_amm(canonicWethUsdmAmm);
+        IContraparty(contraparty).register_amm(canonicBtcbUsdmAmm);
+        IContraparty(contraparty).register_amm(canonicUsdt0UsdmAmm);
 
         vm.stopBroadcast();
 
-        _writeDeploymentFile(contraparty, prismQuoter, kumbayaQuoter, prismAmm, kumbayaAmm);
-        emit MegaethStackDeployed(contraparty, prismQuoter, kumbayaQuoter, prismAmm, kumbayaAmm);
+        _writeDeploymentFile(
+            contraparty,
+            prismQuoter,
+            kumbayaQuoter,
+            prismAmm,
+            kumbayaAmm,
+            canonicWethUsdmAmm,
+            canonicBtcbUsdmAmm,
+            canonicUsdt0UsdmAmm
+        );
+        emit MegaethStackDeployed(
+            contraparty,
+            prismQuoter,
+            kumbayaQuoter,
+            prismAmm,
+            kumbayaAmm,
+            canonicWethUsdmAmm,
+            canonicBtcbUsdmAmm,
+            canonicUsdt0UsdmAmm
+        );
     }
 
     function _writeDeploymentFile(
@@ -86,7 +133,10 @@ contract DeployMegaethV3Stack {
         address prismQuoter,
         address kumbayaQuoter,
         address prismAmm,
-        address kumbayaAmm
+        address kumbayaAmm,
+        address canonicWethUsdmAmm,
+        address canonicBtcbUsdmAmm,
+        address canonicUsdt0UsdmAmm
     ) internal {
         vm.createDir(DEPLOYMENT_DIR, true);
         string memory toml = "[megaeth]\n";
@@ -102,7 +152,14 @@ contract DeployMegaethV3Stack {
         toml = string.concat(toml, "kumbaya = \"", _toHexString(kumbayaQuoter), "\"\n\n");
         toml = string.concat(toml, "[megaeth.amms]\n");
         toml = string.concat(toml, "prism_uniswap_v3 = \"", _toHexString(prismAmm), "\"\n");
-        toml = string.concat(toml, "kumbaya_uniswap_v3 = \"", _toHexString(kumbayaAmm), "\"\n\n");
+        toml = string.concat(toml, "kumbaya_uniswap_v3 = \"", _toHexString(kumbayaAmm), "\"\n");
+        toml = string.concat(toml, "canonic_weth_usdm = \"", _toHexString(canonicWethUsdmAmm), "\"\n");
+        toml = string.concat(toml, "canonic_btcb_usdm = \"", _toHexString(canonicBtcbUsdmAmm), "\"\n");
+        toml = string.concat(toml, "canonic_usdt0_usdm = \"", _toHexString(canonicUsdt0UsdmAmm), "\"\n\n");
+        toml = string.concat(toml, "[megaeth.canonic_maobs]\n");
+        toml = string.concat(toml, "weth_usdm = \"", _toHexString(CANONIC_MAOB_WETH_USDM), "\"\n");
+        toml = string.concat(toml, "btcb_usdm = \"", _toHexString(CANONIC_MAOB_BTCB_USDM), "\"\n");
+        toml = string.concat(toml, "usdt0_usdm = \"", _toHexString(CANONIC_MAOB_USDT0_USDM), "\"\n\n");
         toml = string.concat(toml, "[megaeth.pools.prism_weth_usdm]\n");
         toml = string.concat(toml, "address = \"", _toHexString(PRISM_WETH_USDM_POOL), "\"\n");
         toml = string.concat(toml, "fee = ", _toString(V3_FEE_3000), "\n");
@@ -135,6 +192,12 @@ contract DeployMegaethV3Stack {
         require(IUniswapV3Pool(pool).token0() == expectedToken0, "POOL_TOKEN0_MISMATCH");
         require(IUniswapV3Pool(pool).token1() == expectedToken1, "POOL_TOKEN1_MISMATCH");
         require(IUniswapV3Pool(pool).fee() == expectedFee, "POOL_FEE_MISMATCH");
+    }
+
+    function _assertCanonicMarket(address maob, address expectedBase, address expectedQuote) internal view {
+        require(ICanonicMAOB(maob).baseToken() == expectedBase, "CANONIC_BASE_MISMATCH");
+        require(ICanonicMAOB(maob).quoteToken() == expectedQuote, "CANONIC_QUOTE_MISMATCH");
+        require(ICanonicMAOB(maob).marketState() == 0, "CANONIC_MARKET_HALTED");
     }
 
     function _toHexString(address account) internal pure returns (string memory) {
