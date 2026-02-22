@@ -16,7 +16,7 @@ const MEGAETH_TOKENS = [
   { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", decimals: 8 }
 ];
 
-export const APP_VERSION = "2026.02.22.5";
+export const APP_VERSION = "2026.02.22.6";
 
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
@@ -71,7 +71,7 @@ export const APP_CONFIG = {
       cowChainId: 0,
       supported: true,
       elfomoQuoteContract: "",
-      contrapartyQuoteContract: "0x810a121653d87714CcFc472109b266265d46C4eb",
+      contrapartyQuoteContract: "0x338d06316724fff61bd819ff41484c414e15b636",
       rpcUrl: "https://mainnet.megaeth.com/rpc",
       rpcUrls: [
         "https://mainnet.megaeth.com/rpc"
