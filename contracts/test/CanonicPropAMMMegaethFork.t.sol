@@ -11,7 +11,14 @@ interface IERC20 {
 interface IContrapartyVyper {
     function register_amm(address amm) external;
     function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
-    function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient)
+    function swap(
+        address token_in,
+        address token_out,
+        uint256 amount_in,
+        uint256 min_amount_out,
+        address recipient,
+        uint256 deadline
+    )
         external
         returns (uint256);
 }
@@ -45,7 +52,7 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
         vm.label(CANONIC_MAOB_WETH_USDM, "CANONIC_MAOB_WETH_USDM");
         vm.label(user, "USER_MEGAETH");
 
-        contrapartyAddr = vm.deployCode("src/Contraparty.vy");
+        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy");
         contraparty = IContrapartyVyper(contrapartyAddr);
         canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");
 
@@ -58,20 +65,23 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
     }
 
     function testForkMegaeth_CanonicQuoteWethUsdm() public view {
-        uint256 quotedOut = contraparty.quote(WETH, USDM, SWAP_AMOUNT);
-        assertGt(quotedOut, 0, "canonic quote is zero");
+        uint256 directQuote = ICanonicPropAMM(canonicAmm).quote(WETH, USDM, SWAP_AMOUNT);
+        assertGt(directQuote, 0, "canonic direct quote is zero");
+
+        uint256 v2Quote = contraparty.quote(WETH, USDM, SWAP_AMOUNT);
+        assertEq(v2Quote, 0, "v2 quote should be zero with only one registered amm");
     }
 
     function testForkMegaeth_CanonicSwapWethToUsdm() public {
-        uint256 quotedOut = contraparty.quote(WETH, USDM, SWAP_AMOUNT);
-        assertGt(quotedOut, 0, "canonic quote is zero");
+        uint256 quotedOut = ICanonicPropAMM(canonicAmm).quote(WETH, USDM, SWAP_AMOUNT);
+        assertGt(quotedOut, 0, "canonic direct quote is zero");
 
         uint256 usdmBefore = IERC20(USDM).balanceOf(user);
         uint256 wethBefore = IERC20(WETH).balanceOf(user);
 
         vm.startPrank(user);
         IERC20(WETH).approve(contrapartyAddr, SWAP_AMOUNT);
-        uint256 amountOut = contraparty.swap(WETH, USDM, SWAP_AMOUNT, (quotedOut * 99) / 100, user);
+        uint256 amountOut = contraparty.swap(WETH, USDM, SWAP_AMOUNT, (quotedOut * 99) / 100, user, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdmAfter = IERC20(USDM).balanceOf(user);

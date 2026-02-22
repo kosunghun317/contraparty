@@ -81,3 +81,19 @@ forge test -vv --match-contract MegaethForkSmokeTest
 forge test -vv --match-contract MegaethQuoterForkTest
 forge test -vv --match-contract ContrapartyMegaethForkTest
 ```
+
+## MegaETH Deployment
+
+MegaETH uses a fixed base fee (`0.001 gwei`), and EIP-1559 priority fee is not used.
+For live deployment, use the RPC-estimated path below. It calls `eth_estimateGas` on the configured
+MegaETH RPC before each transaction and applies a configurable buffer.
+
+```bash
+set -a && source .env && set +a
+bash script/deploy_megaeth_v2_rpc_estimate.sh
+```
+
+Optional environment knobs:
+- `MEGAETH_RPC_URL` (defaults to `https://mainnet.megaeth.com/rpc`)
+- `MEGAETH_GAS_PRICE_WEI` (defaults to `1000000`)
+- `MEGAETH_GAS_BUFFER_BPS` (defaults to `12000`, i.e. 20% buffer)

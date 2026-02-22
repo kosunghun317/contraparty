@@ -76,7 +76,7 @@ contract DeployMegaethV3Stack {
 
         prismQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(PRISM_FACTORY));
         kumbayaQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(KUMBAYA_FACTORY));
-        contraparty = vm.deployCode("src/Contraparty.vy");
+        contraparty = vm.deployCode("src/ContrapartyV2.vy");
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaQuoter));
         canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");
@@ -128,6 +128,7 @@ contract DeployMegaethV3Stack {
         string memory toml = "[megaeth]\n";
         toml = string.concat(toml, "chain = \"megaeth\"\n");
         toml = string.concat(toml, "chain_id = 4326\n");
+        toml = string.concat(toml, "contraparty_version = \"v2\"\n");
         toml = string.concat(toml, "contraparty = \"", _toHexString(contraparty), "\"\n");
         toml = string.concat(toml, "deployed_at_unix = ", _toString(block.timestamp), "\n\n");
         toml = string.concat(toml, "[megaeth.factories]\n");

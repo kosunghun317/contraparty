@@ -11,7 +11,14 @@ interface IERC20 {
 interface IContrapartyVyper {
     function register_amm(address amm) external;
     function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
-    function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient)
+    function swap(
+        address token_in,
+        address token_out,
+        uint256 amount_in,
+        uint256 min_amount_out,
+        address recipient,
+        uint256 deadline
+    )
         external
         returns (uint256);
 }
@@ -22,6 +29,10 @@ interface IUniswapV3PropAMM {
 
 interface ICanonicPropAMM {
     function register_market(address market) external;
+}
+
+interface IQuoteAMM {
+    function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
 }
 
 interface IUniswapV3Pool {
@@ -86,7 +97,7 @@ contract ContrapartyMegaethForkTest is TestBase {
         vm.label(prismViewQuoter, "PRISM_VIEW_QUOTER_LOCAL");
         vm.label(kumbayaViewQuoter, "KUMBAYA_VIEW_QUOTER_LOCAL");
 
-        contrapartyAddr = vm.deployCode("src/Contraparty.vy");
+        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy");
         contraparty = IContrapartyVyper(contrapartyAddr);
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismViewQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaViewQuoter));
@@ -111,8 +122,7 @@ contract ContrapartyMegaethForkTest is TestBase {
 
     function testForkMegaeth_ContrapartyQuoteWethUsdm() public view {
         uint256 amountIn = 0.1 ether;
-        uint256 quoteOut = contraparty.quote(WETH, USDM, amountIn);
-        assertGt(quoteOut, 0, "contraparty quote is zero");
+        _assertSecondPriceQuote(WETH, USDM, amountIn);
     }
 
     function testForkMegaeth_ContrapartySwapWethToUsdmLarge() public {
@@ -125,7 +135,7 @@ contract ContrapartyMegaethForkTest is TestBase {
 
         vm.startPrank(user);
         IERC20(WETH).approve(contrapartyAddr, amountIn);
-        uint256 usdmOut = contraparty.swap(WETH, USDM, amountIn, minUsdmOut, user);
+        uint256 usdmOut = contraparty.swap(WETH, USDM, amountIn, minUsdmOut, user, block.timestamp + 1 hours);
         vm.stopPrank();
 
         uint256 usdmAfter = IERC20(USDM).balanceOf(user);
@@ -138,14 +148,12 @@ contract ContrapartyMegaethForkTest is TestBase {
 
     function testForkMegaeth_ContrapartyQuoteUsdt0ToUsdm() public view {
         uint256 amountIn = 1_000 * 1e6;
-        uint256 quoteOut = contraparty.quote(USDT0, USDM, amountIn);
-        assertGt(quoteOut, 0, "contraparty USDT0->USDM quote is zero");
+        _assertSecondPriceQuote(USDT0, USDM, amountIn);
     }
 
     function testForkMegaeth_ContrapartyQuoteBtcbToUsdm() public view {
         uint256 amountIn = 1 * 1e8;
-        uint256 quoteOut = contraparty.quote(BTCB, USDM, amountIn);
-        assertGt(quoteOut, 0, "contraparty BTCB->USDM quote is zero");
+        _assertSecondPriceQuote(BTCB, USDM, amountIn);
     }
 
     function _fundUserWeth() internal {
@@ -186,6 +194,36 @@ contract ContrapartyMegaethForkTest is TestBase {
         assertEq(ICanonicMAOB(CANONIC_MAOB_USDT0_USDM).baseToken(), USDT0, "canonic usdt0/usdm base mismatch");
         assertEq(ICanonicMAOB(CANONIC_MAOB_USDT0_USDM).quoteToken(), USDM, "canonic usdt0/usdm quote mismatch");
         assertEq(ICanonicMAOB(CANONIC_MAOB_USDT0_USDM).marketState(), 0, "canonic usdt0/usdm halted");
+    }
+
+    function _assertSecondPriceQuote(address tokenIn, address tokenOut, uint256 amountIn) internal view {
+        uint256 qPrism = IQuoteAMM(prismAmm).quote(tokenIn, tokenOut, amountIn);
+        uint256 qKumbaya = IQuoteAMM(kumbayaAmm).quote(tokenIn, tokenOut, amountIn);
+        uint256 qCanonic = IQuoteAMM(canonicAmm).quote(tokenIn, tokenOut, amountIn);
+        uint256 expectedSecond = _secondHighest(qPrism, qKumbaya, qCanonic);
+        uint256 quoteOut = contraparty.quote(tokenIn, tokenOut, amountIn);
+        assertEq(quoteOut, expectedSecond, "v2 quote must equal second-highest amm quote");
+    }
+
+    function _secondHighest(uint256 a, uint256 b, uint256 c) internal pure returns (uint256) {
+        uint256 top = a;
+        uint256 second = 0;
+
+        if (b > top) {
+            second = top;
+            top = b;
+        } else if (b > second) {
+            second = b;
+        }
+
+        if (c > top) {
+            second = top;
+            top = c;
+        } else if (c > second) {
+            second = c;
+        }
+
+        return second;
     }
 
 }
