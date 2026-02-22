@@ -9,7 +9,6 @@ import {
   hexToString,
   http,
   isAddress,
-  maxUint256,
   parseAbi,
   parseUnits,
   toHex
@@ -52,7 +51,6 @@ const AUTO_SLIPPAGE_BPS = 50;
 const QUOTE_REFRESH_MS = 30_000;
 const FALLBACK_QUOTE_OWNER = "0x0000000000000000000000000000000000000001";
 const NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
-const MAX_UINT256 = maxUint256;
 const APP_CODE = "contraparty";
 const CONTRAPARTY_V2_SWAP_DEADLINE_SEC = 10 * 60;
 const COW_CHAIN_ID_MAINNET = 1;
@@ -68,8 +66,7 @@ const COW_QUOTE_URL_BY_CHAIN = {
 const EXPLORER_TX_BASE_BY_CHAIN = {
   [COW_CHAIN_ID_MAINNET]: "https://etherscan.io/tx/",
   [COW_CHAIN_ID_BASE]: "https://basescan.org/tx/",
-  4326: "https://megaeth.blockscout.com/tx/",
-  6342: "https://megaeth.blockscout.com/tx/"
+  4326: "https://mega.etherscan.io/tx/"
 };
 const COW_SDK_MODULE_URL = "https://esm.sh/@cowprotocol/cow-sdk@7.3.5?bundle";
 const COW_VIEM_ADAPTER_MODULE_URL = "https://esm.sh/@cowprotocol/sdk-viem-adapter@0.3.6?bundle";
@@ -80,7 +77,7 @@ const KYBER_CHAIN_SLUG_BY_ID = {
   8453: "base",
   4326: "megaeth"
 };
-const MEGAETH_CHAIN_IDS = new Set([4326, 6342]);
+const MEGAETH_CHAIN_IDS = new Set([4326]);
 const MEGAETH_FIXED_GAS_PRICE_WEI = 1_000_000n; // 0.001 gwei
 
 const els = {
@@ -1562,6 +1559,10 @@ async function approveTokenIfNeeded(walletClient, owner, quote) {
   if (!approvalState.spender) {
     throw new Error("No spender configured for approval.");
   }
+  const approvalAmount = quote.amountIn;
+  if (approvalAmount <= 0n) {
+    throw new Error("Invalid approval amount.");
+  }
 
   setSwapBusy("Approving...");
   setStatus(`Sending approval to ${shortAddress(approvalState.spender)}...`);
@@ -1571,7 +1572,7 @@ async function approveTokenIfNeeded(walletClient, owner, quote) {
     address: quote.fromToken,
     abi: ERC20_APPROVE_ABI,
     functionName: "approve",
-    args: [approvalState.spender, MAX_UINT256]
+    args: [approvalState.spender, approvalAmount]
   };
   const gas = await estimateContractGasWithFallback(walletClient, txRequest);
   const feeOverrides = await resolveTxFeeOverrides(walletClient);
@@ -1585,7 +1586,7 @@ async function approveTokenIfNeeded(walletClient, owner, quote) {
   await getProvider().waitForTransactionReceipt({ hash: txHash });
   const cacheKey = approvalCacheKey(chainId, owner, quote.fromToken, approvalState.spender);
   if (cacheKey) {
-    state.approvalCache.set(cacheKey, MAX_UINT256);
+    state.approvalCache.set(cacheKey, approvalAmount);
   }
   setStatusTxLink("Approval confirmed:", chainId, txHash);
   setSwapButton("Swap", false);

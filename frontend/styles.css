@@ -497,8 +497,10 @@ body {
   color: var(--cw-5);
 }
 
-.footer-links .docs-link+.docs-link::before {
-  content: " | ";
+.footer-sep {
+  color: var(--cw-5);
+  font-size: 10px;
+  letter-spacing: 0.09em;
 }
 
 .docs-link:hover {
