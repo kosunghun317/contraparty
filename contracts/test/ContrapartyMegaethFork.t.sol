@@ -20,9 +20,17 @@ interface IUniswapV3PropAMM {
     function register_pool(address pool, uint24 fee) external;
 }
 
+interface IUniswapV3Pool {
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function fee() external view returns (uint24);
+}
+
 contract ContrapartyMegaethForkTest is TestBase {
     address private constant WETH = 0x4200000000000000000000000000000000000006;
     address private constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
+    address private constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
+    address private constant BTCB = 0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072;
     uint256 private constant LARGE_SWAP_AMOUNT = 10 ether;
     uint256 private constant INITIAL_WETH = 20 ether;
 
@@ -30,7 +38,11 @@ contract ContrapartyMegaethForkTest is TestBase {
     address private constant KUMBAYA_FACTORY = 0x68b34591f662508076927803c567Cc8006988a09;
     address private constant PRISM_WETH_USDM_POOL = 0xC2FaC0B5B6C075819E654bcFbBBCda2838609d32;
     address private constant KUMBAYA_WETH_USDM_POOL = 0x587F6eeAfc7Ad567e96eD1B62775fA6402164b22;
+    address private constant KUMBAYA_WETH_USDT0_POOL = 0x2809696F2e42eB452C32C3d0A2Dc540858C14125;
+    address private constant KUMBAYA_BTCB_USDM_POOL = 0xc1838B7807e5bd4D56EA630BA35Ac964CF72c9db;
+    address private constant KUMBAYA_USDT0_USDM_POOL = 0x6c8E5D463a2473b1A8bcd87e1cEA2724203A1D8f;
     uint24 private constant V3_FEE_3000 = 3000;
+    uint24 private constant V3_FEE_100 = 100;
     address private prismViewQuoter;
     address private kumbayaViewQuoter;
 
@@ -45,7 +57,11 @@ contract ContrapartyMegaethForkTest is TestBase {
 
         vm.label(WETH, "WETH_MEGAETH");
         vm.label(USDM, "USDM_MEGAETH");
+        vm.label(USDT0, "USDT0_MEGAETH");
+        vm.label(BTCB, "BTCB_MEGAETH");
         vm.label(user, "USER_MEGAETH");
+
+        _assertPoolInfo();
 
         prismViewQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(PRISM_FACTORY));
         kumbayaViewQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(KUMBAYA_FACTORY));
@@ -59,6 +75,9 @@ contract ContrapartyMegaethForkTest is TestBase {
 
         IUniswapV3PropAMM(prismAmm).register_pool(PRISM_WETH_USDM_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_WETH_USDM_POOL, V3_FEE_3000);
+        IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_WETH_USDT0_POOL, V3_FEE_3000);
+        IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_BTCB_USDM_POOL, V3_FEE_3000);
+        IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_USDT0_USDM_POOL, V3_FEE_100);
 
         contraparty.register_amm(prismAmm);
         contraparty.register_amm(kumbayaAmm);
@@ -95,6 +114,28 @@ contract ContrapartyMegaethForkTest is TestBase {
 
     function _fundUserWeth() internal {
         deal(WETH, user, INITIAL_WETH);
+    }
+
+    function _assertPoolInfo() internal view {
+        assertEq(IUniswapV3Pool(PRISM_WETH_USDM_POOL).token0(), WETH, "prism pool token0 mismatch");
+        assertEq(IUniswapV3Pool(PRISM_WETH_USDM_POOL).token1(), USDM, "prism pool token1 mismatch");
+        assertEq(IUniswapV3Pool(PRISM_WETH_USDM_POOL).fee(), V3_FEE_3000, "prism pool fee mismatch");
+
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDM_POOL).token0(), WETH, "kumbaya weth/usdm token0 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDM_POOL).token1(), USDM, "kumbaya weth/usdm token1 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDM_POOL).fee(), V3_FEE_3000, "kumbaya weth/usdm fee mismatch");
+
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDT0_POOL).token0(), WETH, "kumbaya weth/usdt0 token0 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDT0_POOL).token1(), USDT0, "kumbaya weth/usdt0 token1 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_WETH_USDT0_POOL).fee(), V3_FEE_3000, "kumbaya weth/usdt0 fee mismatch");
+
+        assertEq(IUniswapV3Pool(KUMBAYA_BTCB_USDM_POOL).token0(), BTCB, "kumbaya btcb/usdm token0 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_BTCB_USDM_POOL).token1(), USDM, "kumbaya btcb/usdm token1 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_BTCB_USDM_POOL).fee(), V3_FEE_3000, "kumbaya btcb/usdm fee mismatch");
+
+        assertEq(IUniswapV3Pool(KUMBAYA_USDT0_USDM_POOL).token0(), USDT0, "kumbaya usdt0/usdm token0 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_USDT0_USDM_POOL).token1(), USDM, "kumbaya usdt0/usdm token1 mismatch");
+        assertEq(IUniswapV3Pool(KUMBAYA_USDT0_USDM_POOL).fee(), V3_FEE_100, "kumbaya usdt0/usdm fee mismatch");
     }
 
 }

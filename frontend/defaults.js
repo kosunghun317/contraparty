@@ -11,10 +11,12 @@ const ETHEREUM_TOKENS = [
 
 const MEGAETH_TOKENS = [
   { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
-  { symbol: "USDm", address: "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7", decimals: 18 }
+  { symbol: "USDm", address: "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7", decimals: 18 },
+  { symbol: "USDT0", address: "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", decimals: 6 },
+  { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", decimals: 8 }
 ];
 
-export const APP_VERSION = "2026.02.22.2";
+export const APP_VERSION = "2026.02.22.3";
 
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
