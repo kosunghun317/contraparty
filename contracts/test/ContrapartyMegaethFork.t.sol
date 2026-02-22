@@ -20,6 +20,10 @@ interface IUniswapV3PropAMM {
     function register_pool(address pool, uint24 fee) external;
 }
 
+interface ICanonicPropAMM {
+    function register_market(address market) external;
+}
+
 interface IUniswapV3Pool {
     function token0() external view returns (address);
     function token1() external view returns (address);
@@ -61,9 +65,7 @@ contract ContrapartyMegaethForkTest is TestBase {
     IContrapartyVyper private contraparty;
     address private prismAmm;
     address private kumbayaAmm;
-    address private canonicWethUsdmAmm;
-    address private canonicBtcbUsdmAmm;
-    address private canonicUsdt0UsdmAmm;
+    address private canonicAmm;
     function setUp() public {
         vm.createSelectFork("megaeth");
 
@@ -88,24 +90,21 @@ contract ContrapartyMegaethForkTest is TestBase {
         contraparty = IContrapartyVyper(contrapartyAddr);
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismViewQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaViewQuoter));
-        canonicWethUsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_WETH_USDM));
-        canonicBtcbUsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_BTCB_USDM));
-        canonicUsdt0UsdmAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_USDT0_USDM));
-        vm.label(canonicWethUsdmAmm, "CANONIC_PROP_AMM_WETH_USDM");
-        vm.label(canonicBtcbUsdmAmm, "CANONIC_PROP_AMM_BTCB_USDM");
-        vm.label(canonicUsdt0UsdmAmm, "CANONIC_PROP_AMM_USDT0_USDM");
+        canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");
+        vm.label(canonicAmm, "CANONIC_PROP_AMM");
 
         IUniswapV3PropAMM(prismAmm).register_pool(PRISM_WETH_USDM_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_WETH_USDM_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_WETH_USDT0_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_BTCB_USDM_POOL, V3_FEE_3000);
         IUniswapV3PropAMM(kumbayaAmm).register_pool(KUMBAYA_USDT0_USDM_POOL, V3_FEE_100);
+        ICanonicPropAMM(canonicAmm).register_market(CANONIC_MAOB_WETH_USDM);
+        ICanonicPropAMM(canonicAmm).register_market(CANONIC_MAOB_BTCB_USDM);
+        ICanonicPropAMM(canonicAmm).register_market(CANONIC_MAOB_USDT0_USDM);
 
         contraparty.register_amm(prismAmm);
         contraparty.register_amm(kumbayaAmm);
-        contraparty.register_amm(canonicWethUsdmAmm);
-        contraparty.register_amm(canonicBtcbUsdmAmm);
-        contraparty.register_amm(canonicUsdt0UsdmAmm);
+        contraparty.register_amm(canonicAmm);
 
         _fundUserWeth();
     }

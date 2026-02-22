@@ -4,14 +4,9 @@
 # -----------------------------------------------------------------------------
 # CanonicPropAMM
 # -----------------------------------------------------------------------------
-# Pull-based adapter for Canonic MAOB markets.
-# - Contraparty calls quote() for a conservative output estimate.
-# - Contraparty calls swap(); adapter pulls token_in from Contraparty,
-#   executes MAOB taker flow, then approves token_out for pull-settlement.
-#
-# This adapter is intentionally conservative in quote math:
-# - It applies a configurable safety haircut.
-# - It returns 0 when market state/data indicates unsafe quoting.
+# Single Canonic adapter with owner-managed MAOB market registry.
+# - quote(): scans locally registered markets and returns best conservative quote.
+# - swap(): executes on best market, then approves token_out for pull settlement.
 # -----------------------------------------------------------------------------
 
 
@@ -42,6 +37,16 @@ interface CanonicMAOB:
     def buyBaseTargetIn(quoteIn: uint256, minBaseOut: uint256, deadline: uint64, minQuotePerRung: uint256) -> (uint256, uint256): nonpayable
 
 
+event MarketRegistered:
+    market: address
+    base_token: address
+    quote_token: address
+
+
+event MarketRemoved:
+    market: address
+
+
 event AccruedPulled:
     token: address
     recipient: address
@@ -53,12 +58,9 @@ event QuoteHaircutUpdated:
     new_haircut_bps: uint256
 
 
-owner: public(address)
-maob: public(address)
-quote_haircut_bps: public(uint256)
-
-
+MAX_MARKETS: constant(uint256) = 32
 MAX_RUNGS: constant(uint256) = 64
+
 BPS_DENOM: constant(uint256) = 10_000
 DEFAULT_QUOTE_HAIRCUT_BPS: constant(uint256) = 9_990
 MIN_QUOTE_HAIRCUT_BPS: constant(uint256) = 9_500
@@ -71,51 +73,59 @@ MODE_SELL_BASE_TO_QUOTE: constant(uint256) = 1
 MODE_BUY_QUOTE_TO_BASE: constant(uint256) = 2
 
 
+owner: public(address)
+quote_haircut_bps: public(uint256)
+markets: public(DynArray[address, MAX_MARKETS])
+market_registered: public(HashMap[address, bool])
+market_pair_key: public(HashMap[address, bytes32])
+
+
 @deploy
-def __init__(maob_: address):
-    assert maob_ != empty(address), "ZERO_MAOB"
+def __init__():
     self.owner = msg.sender
-    self.maob = maob_
     self.quote_haircut_bps = DEFAULT_QUOTE_HAIRCUT_BPS
 
 
+# -----------------------------------------------------------------------------
+# Core API
+# -----------------------------------------------------------------------------
 @external
 @view
 def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
-    mode: uint256 = self._pair_mode(token_in, token_out)
-    if mode == MODE_INVALID or amount_in == 0:
-        return 0
-
-    if not self._is_market_active():
-        return 0
-
-    if mode == MODE_SELL_BASE_TO_QUOTE:
-        return self._quote_sell_base_to_quote(amount_in)
-
-    return self._quote_buy_quote_to_base(amount_in)
+    _market: address = empty(address)
+    _mode: uint256 = MODE_INVALID
+    quoted_out: uint256 = 0
+    _market, _mode, quoted_out = self._best_market(token_in, token_out, amount_in)
+    return quoted_out
 
 
 @external
 def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_out: uint256) -> uint256:
     assert amount_in > 0, "AMOUNT_IN_ZERO"
 
-    mode: uint256 = self._pair_mode(token_in, token_out)
+    market: address = empty(address)
+    mode: uint256 = MODE_INVALID
+    quoted_out: uint256 = 0
+    market, mode, quoted_out = self._best_market(token_in, token_out, amount_in)
+
+    assert market != empty(address), "NO_MARKET"
     assert mode != MODE_INVALID, "BAD_PAIR"
+    assert quoted_out >= min_amount_out, "NO_ROUTE_OR_LOW_QUOTE"
 
     assert extcall ERC20(token_in).transferFrom(msg.sender, self, amount_in), "TRANSFER_FROM_FAIL"
 
-    current_allowance: uint256 = staticcall ERC20(token_in).allowance(self, self.maob)
+    current_allowance: uint256 = staticcall ERC20(token_in).allowance(self, market)
     if current_allowance != 0:
-        assert extcall ERC20(token_in).approve(self.maob, 0), "APPROVE_RESET_FAIL"
-    assert extcall ERC20(token_in).approve(self.maob, amount_in), "APPROVE_FAIL"
+        assert extcall ERC20(token_in).approve(market, 0), "APPROVE_RESET_FAIL"
+    assert extcall ERC20(token_in).approve(market, amount_in), "APPROVE_FAIL"
 
     amount_out: uint256 = 0
     if mode == MODE_SELL_BASE_TO_QUOTE:
         _quote_fee_paid: uint256 = 0
-        amount_out, _quote_fee_paid = extcall CanonicMAOB(self.maob).sellBaseTargetIn(amount_in, min_amount_out, 0, 0)
+        amount_out, _quote_fee_paid = extcall CanonicMAOB(market).sellBaseTargetIn(amount_in, min_amount_out, 0, 0)
     else:
         _base_fee_paid: uint256 = 0
-        amount_out, _base_fee_paid = extcall CanonicMAOB(self.maob).buyBaseTargetIn(amount_in, min_amount_out, 0, 0)
+        amount_out, _base_fee_paid = extcall CanonicMAOB(market).buyBaseTargetIn(amount_in, min_amount_out, 0, 0)
 
     assert amount_out >= min_amount_out, "MIN_AMOUNT_OUT"
 
@@ -125,6 +135,62 @@ def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_o
     assert extcall ERC20(token_out).approve(msg.sender, amount_out), "APPROVE_OUT_FAIL"
 
     return amount_out
+
+
+# -----------------------------------------------------------------------------
+# Admin
+# -----------------------------------------------------------------------------
+@external
+def register_market(market: address):
+    self._only_owner()
+
+    assert market != empty(address), "ZERO_MARKET"
+    assert not self.market_registered[market], "MARKET_EXISTS"
+    assert len(self.markets) < MAX_MARKETS, "MARKET_LIMIT"
+
+    base_token: address = staticcall CanonicMAOB(market).baseToken()
+    quote_token: address = staticcall CanonicMAOB(market).quoteToken()
+    assert base_token != empty(address) and quote_token != empty(address), "BAD_MARKET_TOKENS"
+    assert base_token != quote_token, "BAD_MARKET_TOKENS"
+
+    self.markets.append(market)
+    self.market_registered[market] = True
+    self.market_pair_key[market] = self._pair_key(base_token, quote_token)
+
+    log MarketRegistered(market=market, base_token=base_token, quote_token=quote_token)
+
+
+@external
+def remove_market(market: address):
+    self._only_owner()
+    assert self.market_registered[market], "MARKET_NOT_FOUND"
+
+    market_count: uint256 = len(self.markets)
+    for i: uint256 in range(MAX_MARKETS):
+        if i >= market_count:
+            break
+
+        if self.markets[i] == market:
+            if i < market_count - 1:
+                self.markets[i] = self.markets[market_count - 1]
+            self.markets.pop()
+            self.market_registered[market] = False
+            self.market_pair_key[market] = empty(bytes32)
+            log MarketRemoved(market=market)
+            return
+
+    assert False, "MARKET_NOT_FOUND"
+
+
+@external
+def set_quote_haircut_bps(new_haircut_bps: uint256):
+    self._only_owner()
+    assert new_haircut_bps >= MIN_QUOTE_HAIRCUT_BPS, "HAIRCUT_TOO_LOW"
+    assert new_haircut_bps <= MAX_QUOTE_HAIRCUT_BPS, "HAIRCUT_TOO_HIGH"
+
+    old_haircut_bps: uint256 = self.quote_haircut_bps
+    self.quote_haircut_bps = new_haircut_bps
+    log QuoteHaircutUpdated(old_haircut_bps=old_haircut_bps, new_haircut_bps=new_haircut_bps)
 
 
 @external
@@ -144,33 +210,82 @@ def pull_accrued(token: address, amount: uint256 = 0, recipient: address = msg.s
 
 
 @external
-def set_quote_haircut_bps(new_haircut_bps: uint256):
-    self._only_owner()
-    assert new_haircut_bps >= MIN_QUOTE_HAIRCUT_BPS, "HAIRCUT_TOO_LOW"
-    assert new_haircut_bps <= MAX_QUOTE_HAIRCUT_BPS, "HAIRCUT_TOO_HIGH"
-
-    old_haircut_bps: uint256 = self.quote_haircut_bps
-    self.quote_haircut_bps = new_haircut_bps
-    log QuoteHaircutUpdated(old_haircut_bps=old_haircut_bps, new_haircut_bps=new_haircut_bps)
+@view
+def market_count() -> uint256:
+    return len(self.markets)
 
 
 # -----------------------------------------------------------------------------
-# Quote helpers
+# Internal routing
 # -----------------------------------------------------------------------------
 @internal
 @view
-def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
-    min_quote_taker: uint256 = staticcall CanonicMAOB(self.maob).minQuoteTaker()
+def _best_market(token_in: address, token_out: address, amount_in: uint256) -> (address, uint256, uint256):
+    if amount_in == 0 or token_in == token_out:
+        return empty(address), MODE_INVALID, 0
+
+    pair_key: bytes32 = self._pair_key(token_in, token_out)
+    best_market: address = empty(address)
+    best_mode: uint256 = MODE_INVALID
+    best_out: uint256 = 0
+
+    market_count: uint256 = len(self.markets)
+    for i: uint256 in range(MAX_MARKETS):
+        if i >= market_count:
+            break
+
+        market: address = self.markets[i]
+        if self.market_pair_key[market] != pair_key:
+            continue
+
+        mode: uint256 = self._pair_mode(market, token_in, token_out)
+        if mode == MODE_INVALID:
+            continue
+
+        out_i: uint256 = self._quote_for_market(market, mode, amount_in)
+        if out_i > best_out:
+            best_market = market
+            best_mode = mode
+            best_out = out_i
+
+    return best_market, best_mode, best_out
+
+
+@internal
+@view
+def _quote_for_market(market: address, mode: uint256, amount_in: uint256) -> uint256:
+    if market == empty(address) or amount_in == 0 or not self.market_registered[market]:
+        return 0
+
+    if not self._is_market_active(market):
+        return 0
+
+    if mode == MODE_SELL_BASE_TO_QUOTE:
+        return self._quote_sell_base_to_quote(market, amount_in)
+
+    if mode == MODE_BUY_QUOTE_TO_BASE:
+        return self._quote_buy_quote_to_base(market, amount_in)
+
+    return 0
+
+
+# -----------------------------------------------------------------------------
+# Quote math
+# -----------------------------------------------------------------------------
+@internal
+@view
+def _quote_sell_base_to_quote(market: address, amount_in: uint256) -> uint256:
+    min_quote_taker: uint256 = staticcall CanonicMAOB(market).minQuoteTaker()
 
     mid_price: uint256 = 0
     precision: uint256 = 0
     updated_at: uint48 = 0
-    mid_price, precision, updated_at = staticcall CanonicMAOB(self.maob).getMidPrice()
+    mid_price, precision, updated_at = staticcall CanonicMAOB(market).getMidPrice()
     if mid_price == 0 or precision == 0 or updated_at == 0:
         return 0
 
-    quote_scale: uint256 = staticcall CanonicMAOB(self.maob).quoteScale()
-    base_scale: uint256 = staticcall CanonicMAOB(self.maob).baseScale()
+    quote_scale: uint256 = staticcall CanonicMAOB(market).quoteScale()
+    base_scale: uint256 = staticcall CanonicMAOB(market).baseScale()
     if quote_scale == 0 or base_scale == 0:
         return 0
 
@@ -180,10 +295,9 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
     if denom == 0:
         return 0
 
-    # MAOB midpoint notional check for sellBaseTargetIn.
     if mid_price > max_value(uint256) // quote_scale:
         return 0
-    sigfigs: uint8 = staticcall CanonicMAOB(self.maob).PRICE_SIGFIGS()
+    sigfigs: uint8 = staticcall CanonicMAOB(market).PRICE_SIGFIGS()
     mid_price_q_raw: uint256 = mid_price * quote_scale
     mid_price_q: uint256 = self._round_sigfig(mid_price_q_raw, sigfigs)
     if mid_price_q == 0:
@@ -192,11 +306,11 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
     if quote_at_mid < min_quote_taker:
         return 0
 
-    rung_count: uint256 = staticcall CanonicMAOB(self.maob).rungCount()
+    rung_count: uint256 = staticcall CanonicMAOB(market).rungCount()
     if rung_count == 0:
         return 0
 
-    rung_denom_u32: uint32 = staticcall CanonicMAOB(self.maob).RUNG_DENOM()
+    rung_denom_u32: uint32 = staticcall CanonicMAOB(market).RUNG_DENOM()
     if rung_denom_u32 == 0:
         return 0
     rung_denom: uint256 = convert(rung_denom_u32, uint256)
@@ -208,7 +322,7 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
         if i >= rung_count or remaining_base == 0:
             break
 
-        rung_bps_u16: uint16 = staticcall CanonicMAOB(self.maob).bpsRungs(i)
+        rung_bps_u16: uint16 = staticcall CanonicMAOB(market).bpsRungs(i)
         rung_bps: uint256 = convert(rung_bps_u16, uint256)
         if rung_bps >= rung_denom:
             continue
@@ -219,7 +333,7 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
         _bid_generation: uint32 = 0
         _ask_cumulative: uint256 = 0
         _bid_cumulative: uint256 = 0
-        _ask_volume, bid_volume, _ask_generation, _bid_generation, _ask_cumulative, _bid_cumulative = staticcall CanonicMAOB(self.maob).getRungState(convert(i, uint16))
+        _ask_volume, bid_volume, _ask_generation, _bid_generation, _ask_cumulative, _bid_cumulative = staticcall CanonicMAOB(market).getRungState(convert(i, uint16))
         if bid_volume == 0:
             continue
 
@@ -254,8 +368,8 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
     if remaining_base != 0 or total_quote_gross == 0:
         return 0
 
-    taker_fee: uint256 = convert(staticcall CanonicMAOB(self.maob).takerFee(), uint256)
-    fee_denom: uint256 = convert(staticcall CanonicMAOB(self.maob).FEE_DENOM(), uint256)
+    taker_fee: uint256 = convert(staticcall CanonicMAOB(market).takerFee(), uint256)
+    fee_denom: uint256 = convert(staticcall CanonicMAOB(market).FEE_DENOM(), uint256)
     if fee_denom == 0 or taker_fee >= fee_denom:
         return 0
 
@@ -264,26 +378,25 @@ def _quote_sell_base_to_quote(amount_in: uint256) -> uint256:
         return 0
 
     quote_net: uint256 = total_quote_gross - quote_fee
-    quoted_out: uint256 = quote_net * self.quote_haircut_bps // BPS_DENOM
-    return quoted_out
+    return quote_net * self.quote_haircut_bps // BPS_DENOM
 
 
 @internal
 @view
-def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
-    min_quote_taker: uint256 = staticcall CanonicMAOB(self.maob).minQuoteTaker()
+def _quote_buy_quote_to_base(market: address, amount_in: uint256) -> uint256:
+    min_quote_taker: uint256 = staticcall CanonicMAOB(market).minQuoteTaker()
     if amount_in < min_quote_taker:
         return 0
 
     mid_price: uint256 = 0
     precision: uint256 = 0
     updated_at: uint48 = 0
-    mid_price, precision, updated_at = staticcall CanonicMAOB(self.maob).getMidPrice()
+    mid_price, precision, updated_at = staticcall CanonicMAOB(market).getMidPrice()
     if mid_price == 0 or precision == 0 or updated_at == 0:
         return 0
 
-    quote_scale: uint256 = staticcall CanonicMAOB(self.maob).quoteScale()
-    base_scale: uint256 = staticcall CanonicMAOB(self.maob).baseScale()
+    quote_scale: uint256 = staticcall CanonicMAOB(market).quoteScale()
+    base_scale: uint256 = staticcall CanonicMAOB(market).baseScale()
     if quote_scale == 0 or base_scale == 0:
         return 0
 
@@ -293,16 +406,16 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
     if denom == 0:
         return 0
 
-    rung_count: uint256 = staticcall CanonicMAOB(self.maob).rungCount()
+    rung_count: uint256 = staticcall CanonicMAOB(market).rungCount()
     if rung_count == 0:
         return 0
 
-    rung_denom_u32: uint32 = staticcall CanonicMAOB(self.maob).RUNG_DENOM()
+    rung_denom_u32: uint32 = staticcall CanonicMAOB(market).RUNG_DENOM()
     if rung_denom_u32 == 0:
         return 0
     rung_denom: uint256 = convert(rung_denom_u32, uint256)
 
-    sigfigs: uint8 = staticcall CanonicMAOB(self.maob).PRICE_SIGFIGS()
+    sigfigs: uint8 = staticcall CanonicMAOB(market).PRICE_SIGFIGS()
     remaining_quote: uint256 = amount_in
     base_gross: uint256 = 0
 
@@ -316,11 +429,11 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
         _bid_generation: uint32 = 0
         _ask_cumulative: uint256 = 0
         _bid_cumulative: uint256 = 0
-        ask_volume, _bid_volume, _ask_generation, _bid_generation, _ask_cumulative, _bid_cumulative = staticcall CanonicMAOB(self.maob).getRungState(convert(i, uint16))
+        ask_volume, _bid_volume, _ask_generation, _bid_generation, _ask_cumulative, _bid_cumulative = staticcall CanonicMAOB(market).getRungState(convert(i, uint16))
         if ask_volume == 0:
             continue
 
-        rung_bps_u16: uint16 = staticcall CanonicMAOB(self.maob).bpsRungs(i)
+        rung_bps_u16: uint16 = staticcall CanonicMAOB(market).bpsRungs(i)
         rung_bps: uint256 = convert(rung_bps_u16, uint256)
         if rung_bps > max_value(uint256) - rung_denom:
             continue
@@ -353,7 +466,6 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
             fill_base = remaining_quote * denom // price_q
             if fill_base == 0:
                 break
-            # Conservative for partial rung: assume all remaining quote is consumed.
             quote_used = remaining_quote
 
         if fill_base > max_value(uint256) - base_gross:
@@ -365,8 +477,8 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
     if base_gross == 0:
         return 0
 
-    taker_fee: uint256 = convert(staticcall CanonicMAOB(self.maob).takerFee(), uint256)
-    fee_denom: uint256 = convert(staticcall CanonicMAOB(self.maob).FEE_DENOM(), uint256)
+    taker_fee: uint256 = convert(staticcall CanonicMAOB(market).takerFee(), uint256)
+    fee_denom: uint256 = convert(staticcall CanonicMAOB(market).FEE_DENOM(), uint256)
     if fee_denom == 0 or taker_fee >= fee_denom:
         return 0
 
@@ -375,8 +487,7 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
         return 0
 
     base_net: uint256 = base_gross - base_fee
-    quoted_out: uint256 = base_net * self.quote_haircut_bps // BPS_DENOM
-    return quoted_out
+    return base_net * self.quote_haircut_bps // BPS_DENOM
 
 
 # -----------------------------------------------------------------------------
@@ -384,9 +495,9 @@ def _quote_buy_quote_to_base(amount_in: uint256) -> uint256:
 # -----------------------------------------------------------------------------
 @internal
 @view
-def _pair_mode(token_in: address, token_out: address) -> uint256:
-    base_token: address = staticcall CanonicMAOB(self.maob).baseToken()
-    quote_token: address = staticcall CanonicMAOB(self.maob).quoteToken()
+def _pair_mode(market: address, token_in: address, token_out: address) -> uint256:
+    base_token: address = staticcall CanonicMAOB(market).baseToken()
+    quote_token: address = staticcall CanonicMAOB(market).quoteToken()
 
     if token_in == base_token and token_out == quote_token:
         return MODE_SELL_BASE_TO_QUOTE
@@ -397,9 +508,17 @@ def _pair_mode(token_in: address, token_out: address) -> uint256:
 
 @internal
 @view
-def _is_market_active() -> bool:
-    state: uint8 = staticcall CanonicMAOB(self.maob).marketState()
+def _is_market_active(market: address) -> bool:
+    state: uint8 = staticcall CanonicMAOB(market).marketState()
     return state != MARKET_HALTED
+
+
+@internal
+@pure
+def _pair_key(token_a: address, token_b: address) -> bytes32:
+    if convert(token_a, uint256) < convert(token_b, uint256):
+        return keccak256(concat(convert(token_a, bytes32), convert(token_b, bytes32)))
+    return keccak256(concat(convert(token_b, bytes32), convert(token_a, bytes32)))
 
 
 @internal

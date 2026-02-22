@@ -17,6 +17,8 @@ interface IContrapartyVyper {
 }
 
 interface ICanonicPropAMM {
+    function register_market(address market) external;
+    function market_count() external view returns (uint256);
     function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
     function quote_haircut_bps() external view returns (uint256);
     function set_quote_haircut_bps(uint256 new_haircut_bps) external;
@@ -45,11 +47,12 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
 
         contrapartyAddr = vm.deployCode("src/Contraparty.vy");
         contraparty = IContrapartyVyper(contrapartyAddr);
-        canonicAmm = vm.deployCode("src/CanonicPropAMM.vy", abi.encode(CANONIC_MAOB_WETH_USDM));
+        canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");
 
         vm.label(contrapartyAddr, "CONTRAPARTY");
         vm.label(canonicAmm, "CANONIC_PROP_AMM");
 
+        ICanonicPropAMM(canonicAmm).register_market(CANONIC_MAOB_WETH_USDM);
         contraparty.register_amm(canonicAmm);
         _fundUserWeth();
     }
@@ -81,6 +84,7 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
 
     function testForkMegaeth_CanonicHaircutCanBeTightened() public {
         ICanonicPropAMM amm = ICanonicPropAMM(canonicAmm);
+        assertEq(amm.market_count(), 1, "expected one registered market");
         uint256 beforeBps = amm.quote_haircut_bps();
         uint256 quoteBefore = amm.quote(WETH, USDM, SWAP_AMOUNT);
         assertGt(quoteBefore, 0, "pre-quote is zero");

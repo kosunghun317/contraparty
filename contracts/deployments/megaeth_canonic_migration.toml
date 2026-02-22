@@ -1,0 +1,7 @@
+[megaeth_canonic_migration]
+contraparty = "0x338d06316724fff61bd819ff41484c414e15b636"
+new_canonic_amm = "0x5ccce70550ef8347b63a0708463606a6bc6ef7d1"
+removed_canonic_weth_usdm = "0x0341f4282d10c1a130c21ce0bdce82076951e819"
+removed_canonic_btcb_usdm = "0xe482786c2183d409b254794595ad8fb2cb52a453"
+removed_canonic_usdt0_usdm = "0xa98d957267b63f72ecf8bc163cb918cc077c9b67"
+deployed_at_unix = 1771790776
