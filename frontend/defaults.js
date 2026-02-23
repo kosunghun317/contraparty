@@ -1,3 +1,5 @@
+const NATIVE_TOKEN_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
 const BASE_TOKENS = [
   { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
   { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
@@ -10,13 +12,14 @@ const ETHEREUM_TOKENS = [
 ];
 
 const MEGAETH_TOKENS = [
+  { symbol: "ETH", address: NATIVE_TOKEN_ADDRESS, decimals: 18 },
   { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
   { symbol: "USDm", address: "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7", decimals: 18 },
   { symbol: "USDT0", address: "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", decimals: 6 },
   { symbol: "BTC.b", address: "0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072", decimals: 8 }
 ];
 
-export const APP_VERSION = "2026.02.22.5";
+export const APP_VERSION = "2026.02.24.1";
 
 export const APP_CONFIG = {
   defaultNetwork: "megaeth",
@@ -29,6 +32,7 @@ export const APP_CONFIG = {
       elfomoQuoteContract: "",
       contrapartyQuoteContract: "",
       contrapartyVersion: "v1",
+      wrappedNativeToken: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
       rpcUrl: "https://ethereum-rpc.publicnode.com",
       rpcUrls: [
         "https://ethereum-rpc.publicnode.com",
@@ -52,6 +56,7 @@ export const APP_CONFIG = {
       elfomoQuoteContract: "0xf0f0F0F0FB0d738452EfD03A28e8be14C76d5f73",
       contrapartyQuoteContract: "0x0341F4282D10C1A130C21CE0BDcE82076951e819",
       contrapartyVersion: "v1",
+      wrappedNativeToken: "0x4200000000000000000000000000000000000006",
       rpcUrl: "https://base-rpc.publicnode.com",
       rpcUrls: [
         "https://base-rpc.publicnode.com",
@@ -73,8 +78,9 @@ export const APP_CONFIG = {
       cowChainId: 0,
       supported: true,
       elfomoQuoteContract: "",
-      contrapartyQuoteContract: "0x2Ede240d8E64e7Be3B103d9434733D56caFd9059",
+      contrapartyQuoteContract: "0x62b02A43bAE932c28D82EdDBbF3c7153E8F85135",
       contrapartyVersion: "v2",
+      wrappedNativeToken: "0x4200000000000000000000000000000000000006",
       rpcUrl: "https://mainnet.megaeth.com/rpc",
       rpcUrls: [
         "https://mainnet.megaeth.com/rpc"

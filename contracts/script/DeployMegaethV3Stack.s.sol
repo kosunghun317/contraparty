@@ -76,7 +76,7 @@ contract DeployMegaethV3Stack {
 
         prismQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(PRISM_FACTORY));
         kumbayaQuoter = vm.deployCode("src/MegaethViewQuoter.sol", abi.encode(KUMBAYA_FACTORY));
-        contraparty = vm.deployCode("src/ContrapartyV2.vy");
+        contraparty = vm.deployCode("src/ContrapartyV2.vy", abi.encode(WETH));
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaQuoter));
         canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");

@@ -1,0 +1,8 @@
+[megaeth_contraparty_redeploy]
+old_contraparty = "0x1f60e7d203da3161acfb22d005551f0ed86d6552"
+new_contraparty = "0x62b02a43bae932c28d82eddbbf3c7153e8f85135"
+weth = "0x4200000000000000000000000000000000000006"
+prism_amm = "0xecd83a2405eac09af50665ad42dbdbb48beabdd8"
+kumbaya_amm = "0x7d70c03422d5850c9141336b16221ae13cabdd2a"
+canonic_amm = "0x4c1d51334521c78812b26d4c90d74c37a1431b6e"
+deployed_at_unix = 1771867393

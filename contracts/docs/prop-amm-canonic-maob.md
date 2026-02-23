@@ -40,7 +40,7 @@ Flow:
 - Iterates bid-side rung liquidity (`getRungState`) up to `MAX_RUNGS`.
 - Computes fillable base against rung price and sums gross quote output.
 - Applies taker fee and then safety haircut:
-  - `quote_haircut_bps` (configurable, default `9990` = 0.1% haircut)
+  - `quote_haircut_bps` (configurable, default `9999` = 0.01% haircut)
 
 If full input cannot be covered by rung liquidity, returns `0`.
 
@@ -90,4 +90,4 @@ The adapter intentionally underquotes when uncertain so Contraparty does not rou
 - structural validation of midpoint/scales
 - rung-by-rung liquidity checks
 - taker fee deduction
-- configurable haircut (default 0.1%) before returning quote
+- configurable haircut (default 0.01%) before returning quote

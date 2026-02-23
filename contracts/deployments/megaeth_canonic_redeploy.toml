@@ -1,0 +1,6 @@
+[megaeth_canonic_redeploy]
+contraparty = "0x2ede240d8e64e7be3b103d9434733d56cafd9059"
+old_canonic_amm = "0xc2c7ba229221ec2920291cf7d383f0816b67ddc0"
+new_canonic_amm = "0x4c1d51334521c78812b26d4c90d74c37a1431b6e"
+default_quote_haircut_bps = 9999
+deployed_at_unix = 1771845526

@@ -39,6 +39,8 @@ const CONTRAPARTY_SWAP_V1_ABI = parseAbi([
 const CONTRAPARTY_SWAP_V2_ABI = parseAbi([
   "function swap(address token_in, address token_out, uint256 amount_in, uint256 min_amount_out, address recipient, uint256 deadline) returns (uint256)"
 ]);
+const WETH_WRAP_ABI = parseAbi(["function deposit() payable"]);
+const WETH_UNWRAP_ABI = parseAbi(["function withdraw(uint256 wad)"]);
 const ERC20_ALLOWANCE_ABI = parseAbi(["function allowance(address owner, address spender) view returns (uint256)"]);
 const ERC20_BALANCE_ABI = parseAbi(["function balanceOf(address owner) view returns (uint256)"]);
 const ERC20_APPROVE_ABI = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
@@ -50,7 +52,7 @@ const SLIPPAGE_PRESET_BPS = {
 const AUTO_SLIPPAGE_BPS = 50;
 const QUOTE_REFRESH_MS = 30_000;
 const FALLBACK_QUOTE_OWNER = "0x0000000000000000000000000000000000000001";
-const NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+const NATIVE_TOKEN_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 const APP_CODE = "contraparty";
 const CONTRAPARTY_V2_SWAP_DEADLINE_SEC = 10 * 60;
 const COW_CHAIN_ID_MAINNET = 1;
@@ -72,6 +74,7 @@ const COW_SDK_MODULE_URL = "https://esm.sh/@cowprotocol/cow-sdk@7.3.5?bundle";
 const COW_VIEM_ADAPTER_MODULE_URL = "https://esm.sh/@cowprotocol/sdk-viem-adapter@0.3.6?bundle";
 const KYBER_API_BASE_URL = "https://aggregator-api.kyberswap.com";
 const KYBER_CLIENT_ID = "contraparty";
+const KYBER_NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 const KYBER_CHAIN_SLUG_BY_ID = {
   1: "ethereum",
   8453: "base",
@@ -79,6 +82,7 @@ const KYBER_CHAIN_SLUG_BY_ID = {
 };
 const MEGAETH_CHAIN_IDS = new Set([4326]);
 const MEGAETH_FIXED_GAS_PRICE_WEI = 1_000_000n; // 0.001 gwei
+const NATIVE_INPUT_RESERVE_WEI = 1_000_000_000_000_000n; // 0.001 ETH
 
 const els = {
   networkChip: document.getElementById("networkChip"),
@@ -583,7 +587,7 @@ function renderFromBalance(connected, loading = false) {
   }
 
   els.fromBalanceValue.textContent = `Balance: ${formatBalanceDisplay(state.fromTokenBalance, state.fromToken.decimals)}`;
-  setBalanceActionsEnabled(state.fromTokenBalance > 0n);
+  setBalanceActionsEnabled(getSpendableFromBalance() > 0n);
 }
 
 async function readTokenBalance(client, tokenAddress, account) {
@@ -660,13 +664,14 @@ async function refreshFromTokenBalance() {
 
 function fillFromAmountByBps(bps) {
   if (!Number.isFinite(bps) || bps <= 0) return;
-  if (state.fromTokenBalance <= 0n) {
+  const spendableBalance = getSpendableFromBalance();
+  if (spendableBalance <= 0n) {
     setStatus("No balance available for selected token.");
     return;
   }
 
-  let fillAmount = (state.fromTokenBalance * BigInt(Math.trunc(bps))) / 10_000n;
-  if (fillAmount === 0n) fillAmount = state.fromTokenBalance;
+  let fillAmount = (spendableBalance * BigInt(Math.trunc(bps))) / 10_000n;
+  if (fillAmount === 0n) fillAmount = spendableBalance;
 
   els.fromAmount.value = formatUnits(fillAmount, state.fromToken.decimals);
   scheduleQuote(0);
@@ -975,6 +980,44 @@ function isNativeTokenAddress(address) {
   return String(address || "").toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
 }
 
+function getWrappedNativeTokenAddress(config = state.activeNetwork) {
+  return normalizeAddress(config?.wrappedNativeToken || "");
+}
+
+function toExecutionTokenAddress(tokenAddress, config = state.activeNetwork) {
+  if (!isNativeTokenAddress(tokenAddress)) {
+    return normalizeAddress(tokenAddress || "");
+  }
+  return getWrappedNativeTokenAddress(config);
+}
+
+function toKyberTokenAddress(tokenAddress) {
+  if (isNativeTokenAddress(tokenAddress)) {
+    return KYBER_NATIVE_TOKEN_ADDRESS;
+  }
+  return normalizeAddress(tokenAddress || "");
+}
+
+function getSpendableFromBalance() {
+  if (state.fromTokenBalance <= 0n) return 0n;
+  if (!isNativeTokenAddress(state.fromToken?.address || "")) return state.fromTokenBalance;
+  if (state.fromTokenBalance <= NATIVE_INPUT_RESERVE_WEI) return 0n;
+  return state.fromTokenBalance - NATIVE_INPUT_RESERVE_WEI;
+}
+
+function getWrapMode() {
+  const wrappedNative = getWrappedNativeTokenAddress(state.activeNetwork);
+  if (!wrappedNative) return "";
+
+  const from = normalizeAddress(state.fromToken?.address || "");
+  const to = normalizeAddress(state.toToken?.address || "");
+  if (!from || !to) return "";
+
+  if (isNativeTokenAddress(from) && to.toLowerCase() === wrappedNative.toLowerCase()) return "wrap";
+  if (from.toLowerCase() === wrappedNative.toLowerCase() && isNativeTokenAddress(to)) return "unwrap";
+  return "";
+}
+
 function getQuoteSpender(quote) {
   if (!quote) return "";
   if (quote.spender) return normalizeAddress(quote.spender);
@@ -1027,13 +1070,6 @@ async function getApprovalState(owner, quote) {
 
   const cacheKey = approvalCacheKey(state.activeNetwork?.chainId, owner, quote.fromToken, spender);
   const cachedAllowance = cacheKey ? state.approvalCache.get(cacheKey) || 0n : 0n;
-  if (cachedAllowance >= quote.amountIn) {
-    return {
-      spender,
-      allowance: cachedAllowance,
-      needsApproval: false
-    };
-  }
 
   if (!spender) {
     return {
@@ -1061,18 +1097,10 @@ async function getApprovalState(owner, quote) {
       needsApproval: allowance < quote.amountIn
     };
   } catch {
-    if (cachedAllowance >= quote.amountIn) {
-      return {
-        spender,
-        allowance: cachedAllowance,
-        needsApproval: false
-      };
-    }
-
     return {
       spender,
-      allowance: 0n,
-      needsApproval: true
+      allowance: cachedAllowance,
+      needsApproval: cachedAllowance < quote.amountIn
     };
   }
 }
@@ -1102,6 +1130,28 @@ async function refreshSwapButtonState() {
 
   if (state.fromToken.address.toLowerCase() === state.toToken.address.toLowerCase()) {
     setSwapButton("Swap", true);
+    return;
+  }
+
+  const wrapMode = getWrapMode();
+  if (wrapMode) {
+    const account = await getWalletAccount(false);
+    if (requestId !== state.swapButtonNonce || state.swapBusy) return;
+
+    if (!account) {
+      setSwapButton("Connect Wallet", false);
+      return;
+    }
+
+    const walletChainId = await getWalletChainId();
+    if (requestId !== state.swapButtonNonce || state.swapBusy) return;
+
+    if (walletChainId > 0 && walletChainId !== state.activeNetwork.chainId) {
+      setSwapButton("Switch Chain", false);
+      return;
+    }
+
+    setSwapButton(wrapMode === "wrap" ? "Wrap" : "Unwrap", false);
     return;
   }
 
@@ -1135,6 +1185,11 @@ async function refreshSwapButtonState() {
 
   if (walletChainId > 0 && walletChainId !== state.activeNetwork.chainId) {
     setSwapButton("Switch Chain", false);
+    return;
+  }
+
+  if (isNativeTokenAddress(state.fromToken.address)) {
+    setSwapButton("Swap", false);
     return;
   }
 
@@ -1310,6 +1365,7 @@ async function runQuote() {
   const requestId = ++state.quoteNonce;
   const slippageConfig = resolveSlippageConfig();
   const recipientConfig = validateRecipient(state.recipient);
+  const wrapMode = getWrapMode();
 
   const amountRaw = els.fromAmount.value.trim();
   if (!amountRaw) {
@@ -1335,14 +1391,56 @@ async function runQuote() {
     return;
   }
 
+  if (wrapMode) {
+    els.toAmount.value = formatUnits(amountIn, state.toToken.decimals);
+    els.routeInfo.textContent = wrapMode === "wrap" ? "Native Wrapper (ETH->WETH)" : "Native Wrapper (WETH->ETH)";
+    els.minOutInfo.textContent = `${formatUnits(amountIn, state.toToken.decimals)} ${state.toToken.symbol} (exact)`;
+    setQuoteHidden(false);
+
+    state.latestQuote = {
+      source: wrapMode,
+      sourceLabel: wrapMode === "wrap" ? "Wrap" : "Unwrap",
+      networkKey: state.activeNetworkKey,
+      chainId: state.activeNetwork.chainId,
+      cowChainId: 0,
+      fromToken: state.fromToken.address,
+      toToken: state.toToken.address,
+      executionFromToken: state.fromToken.address,
+      executionToToken: state.toToken.address,
+      nativeValueIn: wrapMode === "wrap" ? amountIn : 0n,
+      amountIn,
+      quotedOut: amountIn,
+      minOut: amountIn,
+      slippageBps: 0,
+      slippageLabel: "0%",
+      receiver: "",
+      spender: "",
+      executable: true,
+      kyberRouteSummary: null,
+      kyberChainSlug: ""
+    };
+
+    setStatus(wrapMode === "wrap" ? "Ready to wrap ETH into WETH." : "Ready to unwrap WETH into ETH.");
+    if (!state.swapBusy) void refreshSwapButtonState();
+    return;
+  }
+  const nativeInputSelected = isNativeTokenAddress(state.fromToken.address);
+  const nativeOutputSelected = isNativeTokenAddress(state.toToken.address);
+
+  const executionTokenIn = toExecutionTokenAddress(state.fromToken.address, state.activeNetwork);
+  const executionTokenOut = toExecutionTokenAddress(state.toToken.address, state.activeNetwork);
+  const kyberTokenIn = toKyberTokenAddress(state.fromToken.address);
+  const kyberTokenOut = toKyberTokenAddress(state.toToken.address);
+
   const cowChainId = getCowChainId();
-  const hasCowQuote = Boolean(getCowQuoteUrl(cowChainId));
+  const hasCowQuote = Boolean(getCowQuoteUrl(cowChainId)) && !nativeInputSelected && !nativeOutputSelected;
   const elfomoQuoteContract = state.activeNetwork?.elfomoQuoteContract || "";
-  const hasElfomoQuote = state.activeNetwork?.chainId === COW_CHAIN_ID_BASE && isAddress(elfomoQuoteContract);
+  const hasElfomoQuote =
+    state.activeNetwork?.chainId === COW_CHAIN_ID_BASE && isAddress(elfomoQuoteContract) && !nativeInputSelected && !nativeOutputSelected;
   const contrapartyQuoteContract = normalizeAddress(state.activeNetwork?.contrapartyQuoteContract || "");
   const hasContrapartyQuote = Boolean(contrapartyQuoteContract);
   const kyberChainSlug = state.activeNetworkKey === "megaeth" ? getKyberChainSlug(state.activeNetwork?.chainId) : "";
-  const hasKyberQuote = Boolean(kyberChainSlug);
+  const hasKyberQuote = Boolean(kyberChainSlug) && Boolean(kyberTokenIn) && Boolean(kyberTokenOut);
 
   if (!hasCowQuote && !hasElfomoQuote && !hasContrapartyQuote && !hasKyberQuote) {
     clearQuote("Selected chain is not supported for quote backends.");
@@ -1359,8 +1457,8 @@ async function runQuote() {
 
     const cowQuotePromise = hasCowQuote
       ? quoteCow(cowChainId, {
-          sellToken: state.fromToken.address,
-          buyToken: state.toToken.address,
+          sellToken: executionTokenIn,
+          buyToken: executionTokenOut,
           from: quoteOwner,
           receiver: quoteReceiver,
           kind: "sell",
@@ -1369,7 +1467,7 @@ async function runQuote() {
       : Promise.resolve(0n);
 
     const elfomoQuotePromise = hasElfomoQuote
-      ? quoteElfomo(provider, elfomoQuoteContract, state.fromToken.address, state.toToken.address, amountIn)
+      ? quoteElfomo(provider, elfomoQuoteContract, executionTokenIn, executionTokenOut, amountIn)
       : Promise.resolve(0n);
 
     const contrapartyQuotePromise = hasContrapartyQuote
@@ -1377,7 +1475,7 @@ async function runQuote() {
       : Promise.resolve(0n);
 
     const kyberQuotePromise = hasKyberQuote
-      ? quoteKyber(kyberChainSlug, state.fromToken.address, state.toToken.address, amountIn)
+      ? quoteKyber(kyberChainSlug, kyberTokenIn, kyberTokenOut, amountIn)
       : Promise.resolve(null);
 
     const [cowQuotedOut, elfomoQuotedOut, contrapartyQuotedOut, kyberQuoteResult] = await Promise.all([
@@ -1396,7 +1494,7 @@ async function runQuote() {
         label: "CoW Protocol",
         quotedOut: cowQuotedOut,
         spender: getCowVaultRelayerAddress(cowChainId),
-        executable: true
+        executable: !nativeInputSelected
       });
     }
     if (elfomoQuotedOut > 0n) {
@@ -1405,7 +1503,7 @@ async function runQuote() {
         label: "ElfomoFi",
         quotedOut: elfomoQuotedOut,
         spender: normalizeAddress(elfomoQuoteContract),
-        executable: true
+        executable: !nativeInputSelected
       });
     }
     if (contrapartyQuotedOut > 0n) {
@@ -1476,6 +1574,9 @@ async function runQuote() {
       cowChainId,
       fromToken: state.fromToken.address,
       toToken: state.toToken.address,
+      executionFromToken: state.fromToken.address,
+      executionToToken: state.toToken.address,
+      nativeValueIn: nativeInputSelected && sourceKey === "contraparty" ? amountIn : 0n,
       amountIn,
       quotedOut,
       minOut,
@@ -1599,11 +1700,19 @@ async function executeContrapartySwap(walletClient, owner, quote, receiver) {
     throw new Error("Contraparty contract is not configured on this chain.");
   }
 
+  const executionFromToken = normalizeAddress(quote.executionFromToken || quote.fromToken || "");
+  const executionToToken = normalizeAddress(quote.executionToToken || quote.toToken || "");
+  if (!executionFromToken || !executionToToken) {
+    throw new Error("Swap token mapping is invalid.");
+  }
+
+  const nativeValueIn = typeof quote.nativeValueIn === "bigint" && quote.nativeValueIn > 0n ? quote.nativeValueIn : 0n;
+  const swapAmountIn = nativeValueIn > 0n ? 0n : quote.amountIn;
   const contrapartyVersion = String(state.activeNetwork?.contrapartyVersion || "v1").toLowerCase();
   const swapDeadline = BigInt(Math.floor(Date.now() / 1000) + CONTRAPARTY_V2_SWAP_DEADLINE_SEC);
   const swapArgs = contrapartyVersion === "v2"
-    ? [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver, swapDeadline]
-    : [quote.fromToken, quote.toToken, quote.amountIn, quote.minOut, receiver];
+    ? [executionFromToken, executionToToken, swapAmountIn, quote.minOut, receiver, swapDeadline]
+    : [executionFromToken, executionToToken, swapAmountIn, quote.minOut, receiver];
   const swapAbi = contrapartyVersion === "v2" ? CONTRAPARTY_SWAP_V2_ABI : CONTRAPARTY_SWAP_V1_ABI;
 
   setSwapBusy("Swapping...");
@@ -1614,7 +1723,8 @@ async function executeContrapartySwap(walletClient, owner, quote, receiver) {
     address: contrapartyAddress,
     abi: swapAbi,
     functionName: "swap",
-    args: swapArgs
+    args: swapArgs,
+    value: nativeValueIn
   };
   const gas = await estimateContractGasWithFallback(walletClient, txRequest);
   const feeOverrides = await resolveTxFeeOverrides(walletClient);
@@ -1627,6 +1737,61 @@ async function executeContrapartySwap(walletClient, owner, quote, receiver) {
   setStatusTxLink("Swap submitted:", chainId, txHash);
   await getProvider().waitForTransactionReceipt({ hash: txHash });
   setStatusTxLink("Swap confirmed via Contraparty:", chainId, txHash);
+}
+
+async function executeWrapOrUnwrap(walletClient, owner, wrapMode, amountIn) {
+  const wrappedNative = getWrappedNativeTokenAddress(state.activeNetwork);
+  if (!wrappedNative) {
+    throw new Error("Wrapped native token is not configured for this chain.");
+  }
+
+  if (wrapMode === "wrap") {
+    setSwapBusy("Wrapping...");
+    setStatus("Sending wrap transaction...");
+    const txRequest = {
+      chain: walletClient.chain,
+      account: owner,
+      address: wrappedNative,
+      abi: WETH_WRAP_ABI,
+      functionName: "deposit",
+      args: [],
+      value: amountIn
+    };
+    const gas = await estimateContractGasWithFallback(walletClient, txRequest);
+    const feeOverrides = await resolveTxFeeOverrides(walletClient);
+    const txHash = await walletClient.writeContract({
+      ...txRequest,
+      gas,
+      ...feeOverrides
+    });
+    const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
+    setStatusTxLink("Wrap submitted:", chainId, txHash);
+    await getProvider().waitForTransactionReceipt({ hash: txHash });
+    setStatusTxLink("Wrap confirmed:", chainId, txHash);
+    return;
+  }
+
+  setSwapBusy("Unwrapping...");
+  setStatus("Sending unwrap transaction...");
+  const txRequest = {
+    chain: walletClient.chain,
+    account: owner,
+    address: wrappedNative,
+    abi: WETH_UNWRAP_ABI,
+    functionName: "withdraw",
+    args: [amountIn]
+  };
+  const gas = await estimateContractGasWithFallback(walletClient, txRequest);
+  const feeOverrides = await resolveTxFeeOverrides(walletClient);
+  const txHash = await walletClient.writeContract({
+    ...txRequest,
+    gas,
+    ...feeOverrides
+  });
+  const chainId = Number(walletClient.chain?.id || state.activeNetwork?.chainId || 0);
+  setStatusTxLink("Unwrap submitted:", chainId, txHash);
+  await getProvider().waitForTransactionReceipt({ hash: txHash });
+  setStatusTxLink("Unwrap confirmed:", chainId, txHash);
 }
 
 async function executeElfomoSwap(walletClient, owner, quote, receiver) {
@@ -1790,12 +1955,15 @@ async function executeKyberSwap(walletClient, owner, quote, receiver) {
 
 async function handleSwapSubmit() {
   if (state.swapBusy) return;
+  const wrapMode = getWrapMode();
 
-  const recipientConfig = validateRecipient(state.recipient);
-  if (!recipientConfig.valid) {
-    setStatus("Recipient must be a valid address.");
-    void refreshSwapButtonState();
-    return;
+  if (!wrapMode) {
+    const recipientConfig = validateRecipient(state.recipient);
+    if (!recipientConfig.valid) {
+      setStatus("Recipient must be a valid address.");
+      void refreshSwapButtonState();
+      return;
+    }
   }
 
   let quote = state.latestQuote;
@@ -1813,6 +1981,54 @@ async function handleSwapSubmit() {
   if (quote.executable === false) {
     setStatus("Current route cannot execute with the selected recipient.");
     void refreshSwapButtonState();
+    return;
+  }
+
+  if (wrapMode && quote.amountIn > 0n) {
+    let owner = await getWalletAccount(false);
+    if (!owner) owner = await getWalletAccount(true);
+    if (!owner) {
+      setStatus("Connect wallet to continue.");
+      void refreshSwapButtonState();
+      return;
+    }
+
+    const walletChainId = await getWalletChainId();
+    if (walletChainId !== state.activeNetwork.chainId) {
+      try {
+        setStatus(`Switching wallet to ${state.activeNetwork.label}...`);
+        await ensureWalletChain(state.activeNetwork.chainId);
+        setStatus(`Chain switched to ${state.activeNetwork.label}. Click ${wrapMode === "wrap" ? "Wrap" : "Unwrap"} again.`);
+        void refreshSwapButtonState();
+        return;
+      } catch (err) {
+        if (isUserRejectedError(err)) {
+          setStatus("User rejected the request.");
+        } else {
+          setStatus(`Chain switch failed: ${errorMessage(err, "Unable to switch chain.")}`);
+        }
+        void refreshSwapButtonState();
+        return;
+      }
+    }
+
+    const walletClient = getWalletClient(owner);
+    owner = normalizeAddress(walletClient.account?.address || owner);
+
+    try {
+      await executeWrapOrUnwrap(walletClient, owner, wrapMode, quote.amountIn);
+    } catch (err) {
+      if (isUserRejectedError(err)) {
+        setStatus("User rejected the request.");
+      } else {
+        setStatus(`${wrapMode === "wrap" ? "Wrap" : "Unwrap"} failed: ${errorMessage(err, "Unable to execute request.")}`);
+      }
+    } finally {
+      clearSwapBusy();
+      void refreshFromTokenBalance();
+      void refreshSwapButtonState();
+      scheduleQuote(0);
+    }
     return;
   }
 

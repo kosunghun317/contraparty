@@ -4,11 +4,13 @@ pragma solidity ^0.8.24;
 import {TestBase} from "./TestBase.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockConstantPropAMM} from "./mocks/MockPropAMMs.sol";
+import {MockWETH9} from "./mocks/MockWETH9.sol";
 
 interface IContrapartyV2 {
     function register_amm(address amm) external;
     function quote(address token_in, address token_out, uint256 amount_in) external view returns (uint256);
     function penalty_score(address amm) external view returns (uint256);
+    function WETH_ADDRESS() external view returns (address);
     function swap(
         address token_in,
         address token_out,
@@ -16,23 +18,28 @@ interface IContrapartyV2 {
         uint256 min_amount_out,
         address recipient,
         uint256 deadline
-    ) external returns (uint256);
+    ) external payable returns (uint256);
 }
 
 contract ContrapartyV2Test is TestBase {
     uint256 private constant PENALTY_SCALE = 1e18;
     uint256 private constant SWAP_AMOUNT = 100;
+    address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     address private user = address(0xBEEF);
 
     IContrapartyV2 private contraparty;
-    MockERC20 private weth;
+    MockWETH9 private weth;
     MockERC20 private usdc;
 
     function setUp() public {
-        contraparty = IContrapartyV2(vm.deployCode("src/ContrapartyV2.vy"));
-        weth = new MockERC20("Wrapped Ether", "WETH", 18);
+        weth = new MockWETH9();
         usdc = new MockERC20("USD Coin", "USDC", 6);
+        contraparty = IContrapartyV2(vm.deployCode("src/ContrapartyV2.vy", abi.encode(address(weth))));
+    }
+
+    function testConstructor_SetsWethAddress() public view {
+        assertEq(contraparty.WETH_ADDRESS(), address(weth), "unexpected weth address");
     }
 
     function testSecondPrice_UsesSecondQuoteAtFullPenalty() public {
@@ -186,5 +193,86 @@ contract ContrapartyV2Test is TestBase {
         assertEq(weth.balanceOf(address(partialPullAmm)), expectedPulled, "amm should only hold the pulled portion");
         assertEq(weth.balanceOf(address(contraparty)), 0, "contraparty should not retain token_in leftovers");
         assertEq(expectedRefund, 30, "sanity-check expected refund");
+    }
+
+    function testSwap_WrapsEthInputWhenTokenInIsNative() public {
+        uint256 nativeAmount = 1 ether;
+
+        MockConstantPropAMM onlyAmm = new MockConstantPropAMM(address(usdc), 130);
+        contraparty.register_amm(address(onlyAmm));
+
+        usdc.mint(address(onlyAmm), 1_000_000);
+        vm.deal(user, nativeAmount);
+
+        vm.prank(user);
+        uint256 amountOut =
+            contraparty.swap{value: nativeAmount}(NATIVE_TOKEN, address(usdc), 0, 100, user, block.timestamp + 1);
+
+        assertEq(amountOut, 100, "single-bid settlement should still clear at user min");
+        assertEq(weth.balanceOf(address(onlyAmm)), nativeAmount, "amm should receive wrapped eth input");
+        assertEq(weth.balanceOf(user), 0, "user should not gain weth during wrap path");
+    }
+
+    function testSwap_RevertsWhenNativeTokenInHasNonZeroAmountParam() public {
+        uint256 nativeAmount = 60;
+
+        MockConstantPropAMM onlyAmm = new MockConstantPropAMM(address(usdc), 130);
+        contraparty.register_amm(address(onlyAmm));
+
+        usdc.mint(address(onlyAmm), 1_000_000);
+        vm.deal(user, nativeAmount);
+
+        vm.prank(user);
+        (bool ok,) = address(contraparty).call{value: nativeAmount}(
+            abi.encodeWithSelector(
+                IContrapartyV2.swap.selector, NATIVE_TOKEN, address(usdc), 1, 100, user, block.timestamp + 1
+            )
+        );
+
+        assertTrue(!ok, "swap should fail when amount_in is nonzero for native token input");
+    }
+
+    function testSwap_UnwrapsNativeOutputWhenTokenOutIsNative() public {
+        uint256 usdcIn = 1_000_000;
+        uint256 minNativeOut = 1 ether;
+        uint256 backingNative = 5 ether;
+
+        MockConstantPropAMM onlyAmm = new MockConstantPropAMM(address(weth), 2 ether);
+        contraparty.register_amm(address(onlyAmm));
+
+        vm.deal(address(onlyAmm), backingNative);
+        vm.prank(address(onlyAmm));
+        weth.deposit{value: backingNative}();
+
+        usdc.mint(user, usdcIn);
+        uint256 userEthBefore = user.balance;
+
+        vm.startPrank(user);
+        usdc.approve(address(contraparty), usdcIn);
+        uint256 amountOut =
+            contraparty.swap(address(usdc), NATIVE_TOKEN, usdcIn, minNativeOut, user, block.timestamp + 1);
+        vm.stopPrank();
+
+        assertEq(amountOut, minNativeOut, "single-bid settlement should clear at user min");
+        assertEq(user.balance, userEthBefore + minNativeOut, "recipient should receive native ETH output");
+    }
+
+    function testSwap_RevertsWhenEthSentForNonNativeInput() public {
+        MockConstantPropAMM onlyAmm = new MockConstantPropAMM(address(usdc), 130);
+        contraparty.register_amm(address(onlyAmm));
+
+        usdc.mint(address(onlyAmm), 1_000_000);
+        usdc.mint(user, SWAP_AMOUNT);
+
+        vm.startPrank(user);
+        usdc.approve(address(contraparty), SWAP_AMOUNT);
+        (bool ok,) = address(contraparty).call{value: 1}(
+            abi.encodeWithSelector(
+                IContrapartyV2.swap.selector, address(usdc), address(weth), SWAP_AMOUNT, 1, user, block.timestamp + 1
+            )
+        );
+        vm.stopPrank();
+
+        assertTrue(!ok, "swap should fail when native value is sent for non-weth token_in");
     }
 }

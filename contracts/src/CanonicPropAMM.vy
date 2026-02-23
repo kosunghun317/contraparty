@@ -62,7 +62,7 @@ MAX_MARKETS: constant(uint256) = 32
 MAX_RUNGS: constant(uint256) = 64
 
 BPS_DENOM: constant(uint256) = 10_000
-DEFAULT_QUOTE_HAIRCUT_BPS: constant(uint256) = 9_990
+DEFAULT_QUOTE_HAIRCUT_BPS: constant(uint256) = 9_999
 MIN_QUOTE_HAIRCUT_BPS: constant(uint256) = 9_500
 MAX_QUOTE_HAIRCUT_BPS: constant(uint256) = 10_000
 

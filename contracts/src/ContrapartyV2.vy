@@ -25,6 +25,11 @@ interface ERC20:
     def balanceOf(account: address) -> uint256: view
 
 
+interface WrappedNative:
+    def deposit(): payable
+    def withdraw(amount: uint256): nonpayable
+
+
 interface PropAMM:
     def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256: view
     def swap(token_in: address, token_out: address, amount_in: uint256, min_amount_out: uint256) -> uint256: nonpayable
@@ -66,12 +71,14 @@ QUOTE_OUT_CAP: constant(uint256) = 2**128 - 1
 
 AMM_QUOTE_GAS_LIMIT: constant(uint256) = 1_000_000
 TRY_FILL_GAS_LIMIT: constant(uint256) = 1_000_000
+NATIVE_TOKEN_ADDRESS: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 
 
 # -----------------------------------------------------------------------------
 # Storage
 # -----------------------------------------------------------------------------
 owner: public(address)
+WETH_ADDRESS: public(immutable(address))
 amms: public(DynArray[address, MAX_AMMS])
 penalty_score: public(HashMap[address, uint256])
 penalty_last_update: public(HashMap[address, uint256])
@@ -81,8 +88,16 @@ penalty_last_update: public(HashMap[address, uint256])
 # Constructor
 # -----------------------------------------------------------------------------
 @deploy
-def __init__():
+def __init__(weth_address: address):
+    assert weth_address != empty(address), "ZERO_WETH"
     self.owner = msg.sender
+    WETH_ADDRESS = weth_address
+
+
+@external
+@payable
+def __default__():
+    pass
 
 
 # -----------------------------------------------------------------------------
@@ -91,7 +106,14 @@ def __init__():
 @external
 @view
 def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
-    if amount_in == 0 or token_in == token_out:
+    execution_token_in: address = token_in
+    execution_token_out: address = token_out
+    if token_in == NATIVE_TOKEN_ADDRESS:
+        execution_token_in = WETH_ADDRESS
+    if token_out == NATIVE_TOKEN_ADDRESS:
+        execution_token_out = WETH_ADDRESS
+
+    if amount_in == 0 or execution_token_in == execution_token_out:
         return 0
 
     amm_count: uint256 = len(self.amms)
@@ -105,7 +127,7 @@ def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
             break
 
         amm: address = self.amms[i]
-        quoted_out: uint256 = self._quote_from_amm(amm, token_in, token_out, amount_in)
+        quoted_out: uint256 = self._quote_from_amm(amm, execution_token_in, execution_token_out, amount_in)
         if quoted_out > best_out:
             second_best_out = best_out
             best_out = quoted_out
@@ -117,6 +139,7 @@ def quote(token_in: address, token_out: address, amount_in: uint256) -> uint256:
 
 
 @external
+@payable
 @nonreentrant
 def swap(
     token_in: address,
@@ -126,16 +149,37 @@ def swap(
     recipient: address,
     deadline: uint256
 ) -> uint256:
-    assert amount_in > 0, "AMOUNT_IN_ZERO"
-    assert token_in != token_out, "SAME_TOKEN"
+    native_in: bool = token_in == NATIVE_TOKEN_ADDRESS
+    native_out: bool = token_out == NATIVE_TOKEN_ADDRESS
+
+    execution_token_in: address = token_in
+    execution_token_out: address = token_out
+    if native_in:
+        execution_token_in = WETH_ADDRESS
+    if native_out:
+        execution_token_out = WETH_ADDRESS
+
+    effective_amount_in: uint256 = amount_in
+    if native_in:
+        assert msg.value > 0, "NATIVE_IN_ZERO"
+        assert amount_in == 0, "NATIVE_IN_AMOUNT"
+        effective_amount_in = msg.value
+    else:
+        assert msg.value == 0, "UNEXPECTED_MSG_VALUE"
+
+    assert effective_amount_in > 0, "AMOUNT_IN_ZERO"
+    assert execution_token_in != execution_token_out, "SAME_TOKEN"
     assert recipient != empty(address), "ZERO_RECIPIENT"
     assert block.timestamp <= deadline, "DEADLINE_EXPIRED"
 
     amm_count: uint256 = len(self.amms)
     assert amm_count > 0, "NO_AMMS"
 
-    token_in_balance_before: uint256 = staticcall ERC20(token_in).balanceOf(self)
-    assert extcall ERC20(token_in).transferFrom(msg.sender, self, amount_in), "TRANSFER_FROM_FAIL"
+    token_in_balance_before: uint256 = staticcall ERC20(execution_token_in).balanceOf(self)
+    if native_in:
+        extcall WrappedNative(WETH_ADDRESS).deposit(value=msg.value)
+    else:
+        assert extcall ERC20(execution_token_in).transferFrom(msg.sender, self, effective_amount_in), "TRANSFER_FROM_FAIL"
 
     amms_local: DynArray[address, MAX_AMMS] = []
     quotes: DynArray[uint256, MAX_AMMS] = []
@@ -143,29 +187,45 @@ def swap(
     valid_quote_count: uint256 = 0
 
     amms_local, quotes, scores, valid_quote_count = self._build_quotes(
-        token_in, token_out, amount_in, min_amount_out, amm_count
+        execution_token_in, execution_token_out, effective_amount_in, min_amount_out, amm_count
     )
     amms_local, quotes, scores = self._sort_by_score(amms_local, quotes, scores, valid_quote_count)
 
     filled: bool = False
     amount_out: uint256 = 0
     filled, amount_out = self._try_fill_full_order(
-        token_in, token_out, amount_in, min_amount_out, amms_local, quotes, scores, valid_quote_count
+        execution_token_in,
+        execution_token_out,
+        effective_amount_in,
+        min_amount_out,
+        amms_local,
+        quotes,
+        scores,
+        valid_quote_count
     )
 
     assert filled, "ORDER_UNFILLED"
     assert amount_out >= min_amount_out, "MIN_AMOUNT_OUT"
-    token_in_balance_after: uint256 = staticcall ERC20(token_in).balanceOf(self)
+    token_in_balance_after: uint256 = staticcall ERC20(execution_token_in).balanceOf(self)
     if token_in_balance_after > token_in_balance_before:
         leftover_in: uint256 = token_in_balance_after - token_in_balance_before
-        assert extcall ERC20(token_in).transfer(msg.sender, leftover_in), "REFUND_IN_FAIL"
-    assert extcall ERC20(token_out).transfer(recipient, amount_out), "TRANSFER_OUT_FAIL"
+        if native_in:
+            extcall WrappedNative(WETH_ADDRESS).withdraw(leftover_in)
+            self._safe_send_native(msg.sender, leftover_in)
+        else:
+            assert extcall ERC20(execution_token_in).transfer(msg.sender, leftover_in), "REFUND_IN_FAIL"
+
+    if native_out:
+        extcall WrappedNative(WETH_ADDRESS).withdraw(amount_out)
+        self._safe_send_native(recipient, amount_out)
+    else:
+        assert extcall ERC20(execution_token_out).transfer(recipient, amount_out), "TRANSFER_OUT_FAIL"
 
     log SwapRouted(
         user=msg.sender,
         token_in=token_in,
         token_out=token_out,
-        amount_in=amount_in,
+        amount_in=effective_amount_in,
         amount_out=amount_out,
     )
 
@@ -403,6 +463,23 @@ def _quote_from_amm(amm: address, token_in: address, token_out: address, amount_
 
     quoted_out: uint256 = extract32(response, 0, output_type=uint256)
     return min(quoted_out, QUOTE_OUT_CAP)
+
+
+@internal
+def _safe_send_native(recipient: address, amount: uint256):
+    if amount == 0:
+        return
+
+    ok: bool = False
+    return_data: Bytes[1] = empty(Bytes[1])
+    ok, return_data = raw_call(
+        recipient,
+        b"",
+        value=amount,
+        max_outsize=1,
+        revert_on_failure=False,
+    )
+    assert ok, "ETH_SEND_FAIL"
 
 
 @internal

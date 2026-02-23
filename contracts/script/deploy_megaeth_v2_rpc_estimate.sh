@@ -190,7 +190,7 @@ echo "gas_buffer_bps: $GAS_BUFFER_BPS"
 
 PRISM_QUOTER_BYTECODE="$(append_constructor_address "$(artifact_bytecode "out/MegaethViewQuoter.sol/MegaethViewQuoter.json")" "$PRISM_FACTORY")"
 KUMBAYA_QUOTER_BYTECODE="$(append_constructor_address "$(artifact_bytecode "out/MegaethViewQuoter.sol/MegaethViewQuoter.json")" "$KUMBAYA_FACTORY")"
-CONTRAPARTY_BYTECODE="$(artifact_bytecode "out/ContrapartyV2.vy/ContrapartyV2.json")"
+CONTRAPARTY_BYTECODE="$(append_constructor_address "$(artifact_bytecode "out/ContrapartyV2.vy/ContrapartyV2.json")" "$WETH")"
 
 prism_quoter="$(send_create "MegaethViewQuoter(prism)" "$PRISM_QUOTER_BYTECODE")"
 kumbaya_quoter="$(send_create "MegaethViewQuoter(kumbaya)" "$KUMBAYA_QUOTER_BYTECODE")"

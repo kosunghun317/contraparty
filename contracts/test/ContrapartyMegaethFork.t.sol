@@ -20,6 +20,7 @@ interface IContrapartyVyper {
         uint256 deadline
     )
         external
+        payable
         returns (uint256);
 }
 
@@ -29,6 +30,8 @@ interface IUniswapV3PropAMM {
 
 interface ICanonicPropAMM {
     function register_market(address market) external;
+    function set_quote_haircut_bps(uint256 new_haircut_bps) external;
+    function quote_haircut_bps() external view returns (uint256);
 }
 
 interface IQuoteAMM {
@@ -49,6 +52,7 @@ interface ICanonicMAOB {
 
 contract ContrapartyMegaethForkTest is TestBase {
     address private constant WETH = 0x4200000000000000000000000000000000000006;
+    address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     address private constant USDM = 0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7;
     address private constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
     address private constant BTCB = 0xB0F70C0bD6FD87dbEb7C10dC692a2a6106817072;
@@ -97,7 +101,7 @@ contract ContrapartyMegaethForkTest is TestBase {
         vm.label(prismViewQuoter, "PRISM_VIEW_QUOTER_LOCAL");
         vm.label(kumbayaViewQuoter, "KUMBAYA_VIEW_QUOTER_LOCAL");
 
-        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy");
+        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy", abi.encode(WETH));
         contraparty = IContrapartyVyper(contrapartyAddr);
         prismAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(prismViewQuoter));
         kumbayaAmm = vm.deployCode("src/UniswapV3PropAMM.vy", abi.encode(kumbayaViewQuoter));
@@ -125,6 +129,18 @@ contract ContrapartyMegaethForkTest is TestBase {
         _assertSecondPriceQuote(WETH, USDM, amountIn);
     }
 
+    function testForkMegaeth_ContrapartyQuoteWethUsdm_CanonicHaircutFiveBps() public {
+        ICanonicPropAMM(canonicAmm).set_quote_haircut_bps(9_995);
+        assertEq(ICanonicPropAMM(canonicAmm).quote_haircut_bps(), 9_995, "canonic haircut update failed");
+        _assertSecondPriceQuote(WETH, USDM, 0.1 ether);
+    }
+
+    function testForkMegaeth_ContrapartyQuoteWethUsdm_CanonicHaircutOneBps() public {
+        ICanonicPropAMM(canonicAmm).set_quote_haircut_bps(9_999);
+        assertEq(ICanonicPropAMM(canonicAmm).quote_haircut_bps(), 9_999, "canonic haircut update failed");
+        _assertSecondPriceQuote(WETH, USDM, 0.1 ether);
+    }
+
     function testForkMegaeth_ContrapartySwapWethToUsdmLarge() public {
         uint256 amountIn = LARGE_SWAP_AMOUNT;
         uint256 usdmBefore = IERC20(USDM).balanceOf(user);
@@ -144,6 +160,63 @@ contract ContrapartyMegaethForkTest is TestBase {
         assertEq(wethAfter, wethBefore - amountIn, "incorrect WETH spent");
         assertGt(usdmOut, 0, "weth->usdm zero out");
         assertGt(usdmAfter, usdmBefore, "no net USDM received");
+    }
+
+    function testForkMegaeth_ContrapartySwapEthValueToUsdm() public {
+        uint256 amountInEth = 0.1 ether;
+        uint256 quotedOut = contraparty.quote(NATIVE_TOKEN, USDM, amountInEth);
+        assertGt(quotedOut, 0, "zero quote");
+
+        uint256 usdmBefore = IERC20(USDM).balanceOf(user);
+        uint256 wethBefore = IERC20(WETH).balanceOf(user);
+
+        vm.deal(user, amountInEth + 1 ether);
+        vm.prank(user);
+        uint256 usdmOut = contraparty.swap{value: amountInEth}(
+            NATIVE_TOKEN, USDM, 0, (quotedOut * 995) / 1000, user, block.timestamp + 1 hours
+        );
+
+        uint256 usdmAfter = IERC20(USDM).balanceOf(user);
+        uint256 wethAfter = IERC20(WETH).balanceOf(user);
+        assertEq(wethAfter, wethBefore, "weth balance should be unchanged for eth-only input");
+        assertGt(usdmOut, 0, "eth->usdm zero out");
+        assertGt(usdmAfter, usdmBefore, "no net USDM received");
+    }
+
+    function testForkMegaeth_ContrapartySwapUsdmToNativeEth() public {
+        uint256 seedWethIn = 0.25 ether;
+        uint256 seedQuoteOut = contraparty.quote(WETH, USDM, seedWethIn);
+        assertGt(seedQuoteOut, 0, "zero seed quote");
+
+        vm.startPrank(user);
+        IERC20(WETH).approve(contrapartyAddr, seedWethIn);
+        uint256 seededUsdmOut = contraparty.swap(
+            WETH, USDM, seedWethIn, (seedQuoteOut * 99) / 100, user, block.timestamp + 1 hours
+        );
+        vm.stopPrank();
+
+        uint256 amountInUsdm = seededUsdmOut / 2;
+        assertGt(amountInUsdm, 0, "zero seeded usdm");
+
+        uint256 quotedOut = contraparty.quote(USDM, NATIVE_TOKEN, amountInUsdm);
+        assertGt(quotedOut, 0, "zero quote");
+
+        uint256 ethBefore = user.balance;
+        uint256 usdmBefore = IERC20(USDM).balanceOf(user);
+
+        vm.startPrank(user);
+        IERC20(USDM).approve(contrapartyAddr, amountInUsdm);
+        uint256 ethOut = contraparty.swap(
+            USDM, NATIVE_TOKEN, amountInUsdm, (quotedOut * 99) / 100, user, block.timestamp + 1 hours
+        );
+        vm.stopPrank();
+
+        uint256 ethAfter = user.balance;
+        uint256 usdmAfter = IERC20(USDM).balanceOf(user);
+
+        assertEq(usdmAfter, usdmBefore - amountInUsdm, "incorrect USDM spent");
+        assertGt(ethOut, 0, "usdm->eth zero out");
+        assertEq(ethAfter, ethBefore + ethOut, "recipient should receive native ETH output");
     }
 
     function testForkMegaeth_ContrapartyQuoteUsdt0ToUsdm() public view {

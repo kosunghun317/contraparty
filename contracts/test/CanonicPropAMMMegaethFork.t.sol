@@ -52,7 +52,7 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
         vm.label(CANONIC_MAOB_WETH_USDM, "CANONIC_MAOB_WETH_USDM");
         vm.label(user, "USER_MEGAETH");
 
-        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy");
+        contrapartyAddr = vm.deployCode("src/ContrapartyV2.vy", abi.encode(WETH));
         contraparty = IContrapartyVyper(contrapartyAddr);
         canonicAmm = vm.deployCode("src/CanonicPropAMM.vy");
 
@@ -103,12 +103,48 @@ contract CanonicPropAMMMegaethForkTest is TestBase {
         uint256 afterBps = amm.quote_haircut_bps();
         uint256 quoteAfter = amm.quote(WETH, USDM, SWAP_AMOUNT);
 
-        assertEq(beforeBps, 9_990, "unexpected default haircut");
+        assertEq(beforeBps, 9_999, "unexpected default haircut");
         assertEq(afterBps, 10_000, "haircut update failed");
         assertTrue(quoteAfter >= quoteBefore, "quote should not decrease after reducing haircut");
     }
 
+    function testForkMegaeth_CanonicHaircutFiveBpsSwap() public {
+        _assertHaircutAndSwap(9_995);
+    }
+
+    function testForkMegaeth_CanonicHaircutOneBpsSwap() public {
+        _assertHaircutAndSwap(9_999);
+    }
+
     function _fundUserWeth() internal {
         deal(WETH, user, INITIAL_WETH);
+    }
+
+    function _assertHaircutAndSwap(uint256 newHaircutBps) internal {
+        ICanonicPropAMM amm = ICanonicPropAMM(canonicAmm);
+        uint256 defaultBps = amm.quote_haircut_bps();
+        uint256 quoteBefore = amm.quote(WETH, USDM, SWAP_AMOUNT);
+
+        assertEq(defaultBps, 9_999, "unexpected default haircut");
+        assertGt(quoteBefore, 0, "pre-quote is zero");
+
+        amm.set_quote_haircut_bps(newHaircutBps);
+        uint256 quoteAfter = amm.quote(WETH, USDM, SWAP_AMOUNT);
+        assertEq(amm.quote_haircut_bps(), newHaircutBps, "haircut update failed");
+        if (newHaircutBps >= defaultBps) {
+            assertTrue(quoteAfter >= quoteBefore, "quote should not decrease after reducing haircut");
+        } else {
+            assertTrue(quoteAfter <= quoteBefore, "quote should not increase after increasing haircut");
+        }
+
+        uint256 usdmBefore = IERC20(USDM).balanceOf(user);
+        vm.startPrank(user);
+        IERC20(WETH).approve(contrapartyAddr, SWAP_AMOUNT);
+        uint256 amountOut = contraparty.swap(WETH, USDM, SWAP_AMOUNT, (quoteAfter * 99) / 100, user, block.timestamp + 1 hours);
+        vm.stopPrank();
+
+        uint256 usdmAfter = IERC20(USDM).balanceOf(user);
+        assertGt(amountOut, 0, "swap amount out is zero");
+        assertGt(usdmAfter, usdmBefore, "user USDM not increased");
     }
 }
